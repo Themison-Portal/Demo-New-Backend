@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  # PostgreSQL with pgvector extension
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: postgres-db
+    restart: always # Production: Always restart on failure/reboot
+    ports:
+      - "5432:5432" # Allow access from VPC connector (secured by Cloud Firewall)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    volumes:
+      - postgres_produ_data:/var/lib/postgresql/data
+      # - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql # Start fresh or manage migrations manually
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: themison-redis
+    restart: always
+    ports:
+      - "6379:6379" # Allow access from VPC connector
+    volumes:
+      - redis_prod_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_produ_data:
+  redis_prod_data:

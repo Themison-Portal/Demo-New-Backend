@@ -1,0 +1,20 @@
+[
+  {
+    "origin": [
+      "https://themison-frontend-eu-768873408671.europe-west1.run.app",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ],
+    "method": ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Access-Control-Allow-Origin",
+      "x-goog-resumable",
+      "Content-Length",
+      "Range",
+      "Content-Range",
+      "Accept-Ranges"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

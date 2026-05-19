@@ -1,0 +1,133 @@
+services:
+  # PostgreSQL with pgvector extension
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: themison-db
+    restart: unless-stopped
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./docker/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: themison-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RAG gRPC Microservice
+  rag-service:
+    build:
+      context: ../rag-service
+      dockerfile: Dockerfile
+    container_name: themison-rag-service
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/postgres
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GRPC_PORT: 50051
+      GRPC_MAX_WORKERS: 10
+      HYBRID_SEARCH_ENABLED: "true"
+      SEMANTIC_CACHE_SIMILARITY_THRESHOLD: "0.90"
+      LLM_MODEL: "claude-sonnet-4-20250514"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; channel = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(channel).result(timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: themison-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Database (internal Docker network — use port 5432, not 54322)
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/postgres
+      # Redis (internal Docker network)
+      REDIS_URL: redis://redis:6379/0
+      # API keys (read from host .env)
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      UPLOAD_API_KEY: ${UPLOAD_API_KEY}
+      # Auth0 (optional)
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID:-}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET:-}
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
+      # GCS (optional — omit to use local storage)
+      GCS_BUCKET_TRIAL_DOCUMENTS: ${GCS_BUCKET_TRIAL_DOCUMENTS:-}
+      GCS_BUCKET_PATIENT_DOCUMENTS: ${GCS_BUCKET_PATIENT_DOCUMENTS:-}
+      GCS_CREDENTIALS_PATH: ${GCS_CREDENTIALS_PATH:-}
+      GCS_PROJECT_ID: ${GCS_PROJECT_ID:-}
+      # gRPC RAG service (internal Docker network)
+      RAG_SERVICE_ADDRESS: rag-service:50051
+      USE_GRPC_RAG: ${USE_GRPC_RAG:-false}
+      # CORS
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+      ALLOW_ALL_ORIGINS: ${ALLOW_ALL_ORIGINS:-true}
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Supabase Studio (optional - database GUI)
+  studio:
+    image: supabase/studio:latest
+    container_name: themison-studio
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      SUPABASE_URL: http://kong:8000
+      STUDIO_PG_META_URL: http://meta:8080
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+      SUPABASE_SERVICE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
+  redis_data:
+  backend_uploads:

@@ -1,0 +1,71 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: braided-visitor-484216-i0
+  REGION: europe-west1
+  SERVICE_NAME: core-backend-eu
+  ARTIFACT_REGISTRY: europe-west1-docker.pkg.dev/braided-visitor-484216-i0/themison-repo-eu
+  IMAGE_NAME: core-backend
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authenticate Docker to Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Docker image
+        run: |
+          IMAGE_PATH="${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker build -t "$IMAGE_PATH" .
+          docker push "$IMAGE_PATH"
+
+      - name: Deploy to Cloud Run
+        run: |
+          IMAGE_PATH="${{ env.ARTIFACT_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image "$IMAGE_PATH" \
+            --region ${{ env.REGION }} \
+            --project ${{ env.PROJECT_ID }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances=1 \
+            --set-env-vars="USE_GRPC_RAG=true" \
+            --set-env-vars="AUTH_DISABLED=false" \
+            --set-env-vars="ALLOW_ALL_ORIGINS=true" \
+            --set-env-vars="GCS_PROJECT_ID=${{ env.PROJECT_ID }}" \
+            --set-env-vars="FRONTEND_URL=${{ secrets.FRONTEND_URL }}" \
+            --set-env-vars="EMAIL_FROM=${{ secrets.EMAIL_FROM }}" \
+            --set-env-vars="SENDGRID_API_KEY=${{ secrets.SENDGRID_API_KEY }}" \
+            --set-env-vars="GCS_BUCKET_TRIAL_DOCUMENTS=${{ secrets.GCS_BUCKET_TRIAL_DOCUMENTS }}" \
+            --set-env-vars="GCS_BUCKET_PATIENT_DOCUMENTS=${{ secrets.GCS_BUCKET_PATIENT_DOCUMENTS }}" \
+            --set-env-vars="RAG_SERVICE_ADDRESS=rag-service-eu-768873408671.europe-west1.run.app:443" \
+            --set-secrets="DATABASE_URL=database-url:latest" \
+            --set-secrets="OPENAI_API_KEY=OPENAI_API_KEY:latest" \
+            --set-secrets="ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest" \
+            --set-secrets="UPLOAD_API_KEY=UPLOAD_API_KEY:latest" \
+            --set-secrets="REDIS_URL=REDIS_URL:latest" \
+            --set-secrets="AUTH0_DOMAIN=NEXT_PUBLIC_AUTH0_DOMAIN:latest" \
+            --set-secrets="AUTH0_AUDIENCE=NEXT_PUBLIC_AUTH0_AUDIENCE:latest" \
+            --set-secrets="AUTH0_CLIENT_ID=NEXT_PUBLIC_AUTH0_CLIENT_ID:latest" \
+            --set-secrets="AUTH0_CLIENT_SECRET=AUTH0_CLIENT_SECRET:latest"
