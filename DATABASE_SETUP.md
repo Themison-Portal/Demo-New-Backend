@@ -15,7 +15,6 @@ fixing model inconsistencies, and adding new Collaboration Hub tables.
 | `document_chunks_docling` | RAG | **Active** | **KEEP** |
 | `semantic_cache_responses` | RAG | **Active** | **KEEP** |
 | `activity_types` | Business | Active | **KEEP** |
-| `archive_folder` | Business | Active | **KEEP** |
 | `chat_document_links` | Business | Active | **KEEP** |
 | `chat_messages` | Business | Active | **KEEP** |
 | `chat_sessions` | Business | Active | **KEEP** |
@@ -59,9 +58,9 @@ fixing model inconsistencies, and adding new Collaboration Hub tables.
 
 ## Schema Before vs After
 
-| Aspect | Before (28 tables) | After (35 tables) |
+| Aspect | Before (28 tables) | After (33 tables) |
 |--------|-------------------|-------------------|
-| Total tables | 28 | 35 |
+| Total tables | 28 | 33 |
 | RAG tables | 2 | 2 (unchanged) |
 | Business tables | 26 | 26 (unchanged) |
 | Collaboration Hub tables | 0 | 4 (new) |
@@ -72,7 +71,7 @@ fixing model inconsistencies, and adding new Collaboration Hub tables.
 
 ---
 
-## Tables to KEEP (35 total after migration)
+## Tables to KEEP (33 total after migration)
 
 ### RAG Tables (2)
 - `document_chunks_docling` — vector store with pgvector (1536-dim embeddings)
@@ -140,23 +139,27 @@ The following model files had incorrect types or foreign keys that did not match
 
 4. **Stamp Alembic baseline** (schema already exists, do not re-run it):
    ```bash
-   alembic -c alembic.ini stamp 001
+   DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+   PYTHONPATH=. alembic -c alembic.ini stamp 001
    ```
 
 5. **Apply new Collaboration Hub migration**:
    ```bash
-   alembic -c alembic.ini upgrade head
+   DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+   PYTHONPATH=. alembic -c alembic.ini upgrade head
    ```
 
 6. **Verify all tables exist**:
    ```bash
    psql postgresql://postgres:postgres@localhost:5433/themison_new \
-     -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;"
+     -c "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename;" | cat
+   # should show 33 tables
    ```
 
 7. **Check current migration version**:
    ```bash
-   alembic -c alembic.ini current
+   DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+   PYTHONPATH=. alembic -c alembic.ini current
    # should show: head
    ```
 
@@ -251,7 +254,7 @@ postgresql+asyncpg://postgres:postgres@localhost:5433/themison_new
 
 The schema is applied from `schema_dump.sql` on first setup:
 
-- **35 tables** (2 RAG + 26 business + 4 collaboration hub + 1 alembic)
+- **33 tables** (2 RAG + 26 business + 4 collaboration hub + 1 alembic)
 - **8 enums** (organization_member_type, document_type_enum, visit_status_enum, etc.)
 - Indexes including HNSW for vector search and GIN for BM25
 
@@ -287,10 +290,12 @@ docker exec themison-new-db psql -U postgres -d themison_new \
   -c "SELECT extname FROM pg_extension;"
 
 # Check current Alembic migration
-alembic -c alembic.ini current
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+PYTHONPATH=. alembic -c alembic.ini current
 
 # Check Alembic migration history
-alembic -c alembic.ini history
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+PYTHONPATH=. alembic -c alembic.ini history
 ```
 
 ### RAG Tables
@@ -321,12 +326,12 @@ alembic -c alembic.ini history
 1. Edit or create model file in app/models/ (ORM style only)
         ↓
 2. Generate migration automatically
-   alembic -c alembic.ini revision --autogenerate -m "describe your change"
+   DATABASE_URL=postgresql+psycopg2://... PYTHONPATH=. alembic -c alembic.ini revision --autogenerate -m "describe your change"
         ↓
 3. Review generated file in alembic/versions/
         ↓
 4. Apply locally
-   alembic -c alembic.ini upgrade head
+   DATABASE_URL=postgresql+psycopg2://... PYTHONPATH=. alembic -c alembic.ini upgrade head
         ↓
 5. Commit model + migration file together
    git add app/models/your_model.py alembic/versions/xxxx_your_change.py
@@ -337,7 +342,8 @@ alembic -c alembic.ini history
 ### After pulling someone else's changes
 ```bash
 git pull
-alembic -c alembic.ini upgrade head
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+PYTHONPATH=. alembic -c alembic.ini upgrade head
 ```
 
 ### Common Alembic commands
@@ -350,6 +356,8 @@ alembic -c alembic.ini upgrade head
 | `alembic -c alembic.ini history` | Show all migrations in order |
 | `alembic -c alembic.ini revision --autogenerate -m "msg"` | Generate migration from model changes |
 | `alembic -c alembic.ini stamp head` | Mark DB as up to date without running migrations |
+
+> **Note:** Always prefix with `DATABASE_URL=postgresql+psycopg2://... PYTHONPATH=.` when running locally
 
 ### Team rules
 
@@ -382,8 +390,10 @@ docker exec themison-new-db psql -U postgres -d themison_new -c "\dt"
 # Force reset and reapply
 docker-compose down -v && docker-compose up -d db redis
 psql postgresql://postgres:postgres@localhost:5433/themison_new -f schema_dump.sql
-alembic -c alembic.ini stamp 001
-alembic -c alembic.ini upgrade head
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+PYTHONPATH=. alembic -c alembic.ini stamp 001
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+PYTHONPATH=. alembic -c alembic.ini upgrade head
 ```
 
 **Vector extension missing:**
@@ -421,6 +431,13 @@ ForeignKey("members.profile_id")
 
 # correct FK
 ForeignKey("profiles.id")
+```
+
+**Alembic cannot find DATABASE_URL:**
+```bash
+# always prefix with DATABASE_URL when running locally
+DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5433/themison_new \
+PYTHONPATH=. alembic -c alembic.ini upgrade head
 ```
 
 ---
