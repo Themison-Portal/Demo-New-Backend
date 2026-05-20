@@ -25,7 +25,7 @@ class ArchiveFolderResponse(BaseModel):
     deleted_at: Optional[datetime]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ---------------------
@@ -65,4 +65,4 @@ class SavedResponseResponse(BaseModel):
     deleted_at: Optional[datetime]
 
     class Config:
-        orm_mode = True
+        from_attributes = True

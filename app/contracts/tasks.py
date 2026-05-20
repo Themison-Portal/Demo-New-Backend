@@ -10,7 +10,7 @@ class AssignedUser(BaseModel):
     full_name: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class TaskResponse(BaseModel):
@@ -31,7 +31,7 @@ class TaskResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class TaskCreate(BaseModel):
@@ -48,7 +48,7 @@ class TaskCreate(BaseModel):
     category: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class TaskUpdate(BaseModel):
@@ -64,4 +64,4 @@ class TaskUpdate(BaseModel):
     category: Optional[str] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
