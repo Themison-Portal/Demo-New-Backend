@@ -13,9 +13,7 @@ class ChatThread(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String, nullable=False)
     trial_id = Column(UUID(as_uuid=True), ForeignKey("trials.id"), nullable=True)
-    created_by = Column(
-        UUID(as_uuid=True), ForeignKey("members.profile_id"), nullable=False
-    )
+    created_by = Column(UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow

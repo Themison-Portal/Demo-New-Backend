@@ -14,9 +14,7 @@ class ThreadParticipant(Base):
     # thread_id = Column(
     #     UUID(as_uuid=True), ForeignKey("chat_threads.id"), nullable=False
     # )
-    user_id = Column(
-        UUID(as_uuid=True), ForeignKey("members.profile_id"), nullable=False
-    )
+    user_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=False)
     last_read_message_id = Column(
         UUID(as_uuid=True), ForeignKey("chat_messages.id"), nullable=True
     )
