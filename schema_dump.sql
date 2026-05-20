@@ -1,8 +1,7 @@
---
 -- PostgreSQL database dump
 --
 
-\restrict Xb9G94SEVP6QuA1FRru6vpLykQDS39xNSophdXyj1RUF94mnS3UX1cIa5aSAQ7R
+
 
 -- Dumped from database version 16.12 (Debian 16.12-1.pgdg12+1)
 -- Dumped by pg_dump version 16.12 (Debian 16.12-1.pgdg12+1)
@@ -1439,5 +1438,4 @@ ALTER TABLE ONLY public.visit_documents
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Xb9G94SEVP6QuA1FRru6vpLykQDS39xNSophdXyj1RUF94mnS3UX1cIa5aSAQ7R
 
