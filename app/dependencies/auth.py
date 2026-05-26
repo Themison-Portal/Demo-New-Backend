@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Dict[str, Any]:
     """
@@ -31,8 +32,20 @@ async def get_current_user(
 
     Returns dict with ``id`` (profile UUID), ``email``, ``auth0_sub``.
 
+    If X-User-Email is present in headers, returns proxy user details.
     If AUTH_DISABLED=true in .env, returns a mock test user.
     """
+    # Check for trusted proxy headers
+    x_user_email = request.headers.get("x-user-email")
+    if x_user_email:
+        x_user_name = request.headers.get("x-user-name") or x_user_email.split("@")[0].title()
+        return {
+            "id": f"proxy|{x_user_email}",
+            "email": x_user_email,
+            "auth0_sub": f"proxy|{x_user_email}",
+            "name": x_user_name,
+        }
+
     settings = get_settings()
 
     # Bypass Auth0 when disabled (for testing)
@@ -42,6 +55,7 @@ async def get_current_user(
             "id": "test-user-id",
             "email": "test@themison.com",
             "auth0_sub": "auth0|test-user-id",
+            "name": "Test User",
         }
 
     if not credentials:
@@ -69,6 +83,7 @@ async def get_current_user(
             "https://themison.com/email", ""
         ),
         "auth0_sub": payload.get("sub"),
+        "name": payload.get("name") or payload.get("nickname") or "",
     }
 
 
