@@ -28,4 +28,10 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT
+# Run pending alembic migrations, then start the app.
+# - `alembic upgrade head` is a no-op when the DB is already current.
+# - The `&&` short-circuit means the container exits non-zero if migrations
+#   fail, so we never serve traffic against an out-of-sync schema.
+# - `exec` replaces the shell with uvicorn so SIGTERM from the orchestrator
+#   reaches uvicorn directly (graceful shutdown).
+CMD alembic -c alembic.ini upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT
