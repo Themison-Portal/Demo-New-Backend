@@ -5,6 +5,7 @@ Authentication dependencies — Auth0 JWT verification.
 import logging
 import uuid
 from typing import Any, Dict, Optional
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -19,8 +20,25 @@ from app.models.profiles import Profile
 
 logger = logging.getLogger(__name__)
 
-# Make HTTPBearer optional when auth is disabled
 security = HTTPBearer(auto_error=False)
+
+# Fixed demo member — used when AUTH_DISABLED=true
+DEMO_MEMBER_ID = UUID("00000000-0000-0000-0000-000000000001")
+DEMO_PROFILE_ID = UUID("00000000-0000-0000-0000-000000000002")
+DEMO_ORG_ID = UUID("00000000-0000-0000-0000-000000000003")
+
+
+def _make_demo_member() -> Member:
+    mock = Member()
+    mock.id = DEMO_MEMBER_ID
+    mock.profile_id = DEMO_PROFILE_ID
+    mock.organization_id = DEMO_ORG_ID
+    mock.default_role = "admin"
+    mock.name = "Demo User"
+    mock.email = "demo@themison.com"
+    mock.is_active = True
+    mock.onboarding_completed = True
+    return mock
 
 
 async def get_current_user(
@@ -38,7 +56,9 @@ async def get_current_user(
     # Check for trusted proxy headers
     x_user_email = request.headers.get("x-user-email")
     if x_user_email:
-        x_user_name = request.headers.get("x-user-name") or x_user_email.split("@")[0].title()
+        x_user_name = (
+            request.headers.get("x-user-name") or x_user_email.split("@")[0].title()
+        )
         return {
             "id": f"proxy|{x_user_email}",
             "email": x_user_email,
@@ -48,14 +68,12 @@ async def get_current_user(
 
     settings = get_settings()
 
-    # Bypass Auth0 when disabled (for testing)
     if settings.auth_disabled:
-        logger.warning("Auth0 disabled - using mock test user")
+        logger.warning("Auth0 disabled - using demo user")
         return {
-            "id": "test-user-id",
-            "email": "test@themison.com",
-            "auth0_sub": "auth0|test-user-id",
-            "name": "Test User",
+            "id": str(DEMO_PROFILE_ID),
+            "email": "demo@themison.com",
+            "auth0_sub": "demo|00000000",
         }
 
     if not credentials:
@@ -79,9 +97,7 @@ async def get_current_user(
 
     return {
         "id": payload.get("sub"),
-        "email": payload.get("email") or payload.get(
-            "https://themison.com/email", ""
-        ),
+        "email": payload.get("email") or payload.get("https://themison.com/email", ""),
         "auth0_sub": payload.get("sub"),
         "name": payload.get("name") or payload.get("nickname") or "",
     }
@@ -91,34 +107,17 @@ async def get_current_member(
     user: Dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Member:
-    """
-    Resolve the Auth0 user to a Member record (carries organization_id for scoping).
-
-    Looks up profiles by email, then members by profile_id.
-    Raises 403 if no member record exists.
-
-    If AUTH_DISABLED=true, returns first member in database (for testing).
-    """
     settings = get_settings()
 
-    # Bypass member lookup when auth is disabled (for testing)
+    # ── Demo mode — return fixed mock member, no DB needed ──
     if settings.auth_disabled:
-        logger.warning("Auth0 disabled - returning first available member")
-        result = await db.execute(select(Member).limit(1))
-        member = result.scalars().first()
-        if not member:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No members in database. Create test data first.",
-            )
-        return member
+        logger.warning("Auth0 disabled - returning demo member")
+        return _make_demo_member()
 
     email = user.get("email", "")
 
     # Find profile by email
-    result = await db.execute(
-        select(Profile).where(Profile.email == email)
-    )
+    result = await db.execute(select(Profile).where(Profile.email == email))
     profile = result.scalars().first()
 
     # --- JIT PROVISIONING START ---
@@ -127,25 +126,27 @@ async def get_current_member(
         profile = Profile(
             id=uuid.uuid4(),
             email=email,
-            first_name=user.get("name", "").split(" ")[0] if user.get("name") else "New",
-            last_name=user.get("name", "").split(" ")[1] if user.get("name") and len(user.get("name").split(" ")) > 1 else "User"
+            first_name=(
+                user.get("name", "").split(" ")[0] if user.get("name") else "New"
+            ),
+            last_name=(
+                user.get("name", "").split(" ")[1]
+                if user.get("name") and len(user.get("name").split(" ")) > 1
+                else "User"
+            ),
         )
         db.add(profile)
         await db.flush()
 
     # Find member by profile_id
-    result = await db.execute(
-        select(Member).where(Member.profile_id == profile.id)
-    )
+    result = await db.execute(select(Member).where(Member.profile_id == profile.id))
     member = result.scalars().first()
 
     if not member:
         logger.info("JIT: Creating new membership for %s", email)
-        # Ensure a default organization exists
         from app.models.organizations import Organization
         from app.models.themison_admins import ThemisonAdmin
 
-        # 1. Ensure a system admin exists (needed for Organization.created_by)
         admin_result = await db.execute(select(ThemisonAdmin).limit(1))
         admin = admin_result.scalars().first()
         if not admin:
@@ -154,36 +155,36 @@ async def get_current_member(
                 id=uuid.uuid4(),
                 email="admin@themison.com",
                 name="System Admin",
-                active=True
+                active=True,
             )
             db.add(admin)
             await db.flush()
 
-        # 2. Ensure an organization exists
         org_result = await db.execute(select(Organization).limit(1))
         org = org_result.scalars().first()
-        
+
         if not org:
             logger.info("JIT: Creating default organization")
             org = Organization(
                 id=uuid.uuid4(),
                 name="Themison Global",
                 created_by=admin.id,
-                onboarding_completed=True
+                onboarding_completed=True,
             )
             db.add(org)
             await db.flush()
 
-        # 3. Create the member
         member = Member(
             id=uuid.uuid4(),
             profile_id=profile.id,
             organization_id=org.id,
             email=email,
-            name=user.get("name") or f"{profile.first_name or ''} {profile.last_name or ''}".strip() or email,
-            default_role="admin", # First user or new users get admin in this dev stage
+            name=user.get("name")
+            or f"{profile.first_name or ''} {profile.last_name or ''}".strip()
+            or email,
+            default_role="admin",
             is_active=True,
-            onboarding_completed=True
+            onboarding_completed=True,
         )
         db.add(member)
         await db.commit()
@@ -196,5 +197,4 @@ async def get_current_member(
 async def get_current_user_id(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> str:
-    """Return just the current user's Auth0 sub claim."""
     return current_user["id"]
