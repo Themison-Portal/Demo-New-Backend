@@ -25,6 +25,7 @@ async def list_tasks(
     status: Optional[str] = None,
     priority: Optional[str] = None,
     category: Optional[str] = None,
+    phase_id: Optional[str] = None,
     member: Member = Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
@@ -47,6 +48,9 @@ async def list_tasks(
 
     if category:
         stmt = stmt.where(Task.category == category)
+
+    if phase_id:
+        stmt = stmt.where(Task.phase_id == phase_id)
 
     result = await db.execute(stmt)
     tasks = result.scalars().all()
@@ -76,6 +80,13 @@ async def list_tasks(
                 patient_id=task.patient_id,
                 visit_id=task.visit_id,
                 activity_type_id=task.activity_type_id,
+                phase_id=task.phase_id,
+                assigned_role=task.assigned_role,
+                blocked_reason=task.blocked_reason,
+                blocked_since=task.blocked_since,
+                order_in_phase=task.order_in_phase,
+                suggested_date=task.suggested_date,
+                suggested_assignee=task.suggested_assignee,
                 created_at=task.created_at,
                 updated_at=task.updated_at,
             )
@@ -120,6 +131,13 @@ async def create_task(
         patient_id=task.patient_id,
         visit_id=task.visit_id,
         activity_type_id=task.activity_type_id,
+        phase_id=task.phase_id,
+        assigned_role=task.assigned_role,
+        blocked_reason=task.blocked_reason,
+        blocked_since=task.blocked_since,
+        order_in_phase=task.order_in_phase,
+        suggested_date=task.suggested_date,
+        suggested_assignee=task.suggested_assignee,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -170,6 +188,13 @@ async def update_task(
         patient_id=task.patient_id,
         visit_id=task.visit_id,
         activity_type_id=task.activity_type_id,
+        phase_id=task.phase_id,
+        assigned_role=task.assigned_role,
+        blocked_reason=task.blocked_reason,
+        blocked_since=task.blocked_since,
+        order_in_phase=task.order_in_phase,
+        suggested_date=task.suggested_date,
+        suggested_assignee=task.suggested_assignee,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )

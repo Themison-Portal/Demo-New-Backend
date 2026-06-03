@@ -44,6 +44,7 @@ from app.api.routes.api.chat_messages import router as chat_messages_router
 from app.api.routes.api.qa_repository import router as qa_repository_router
 from app.api.routes.api.archive import router as archive_router
 from app.api.routes.api.tasks import router as tasks_router
+from app.api.routes.api.task_dependencies import router as task_dependencies_router
 from app.api.routes.api.activities import router as trial_activities_router
 from app.api.routes.api.complete_visit import router as complete_visit_router
 from app.api.routes.api.visit_activities import router as visit_activities_router
@@ -229,6 +230,9 @@ app.include_router(
     visit_activities_router, prefix="/api/patient-visits", tags=["patient-visits"]
 )
 app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(
+    task_dependencies_router, prefix="/api/task-dependencies", tags=["task-dependencies"]
+)
 app.include_router(
     patient_documents_router,
     prefix="/api/patient-documents",

@@ -1,5 +1,5 @@
 # app/models/tasks.py
-from sqlalchemy import Column, String, DateTime, ForeignKey, text, text
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -25,6 +25,13 @@ class Task(Base):
     activity_type_id = Column(
         UUID(as_uuid=True), ForeignKey("activity_types.id"), nullable=True
     )
+    phase_id = Column(String, nullable=True)
+    assigned_role = Column(String, nullable=True)
+    blocked_reason = Column(String, nullable=True)
+    blocked_since = Column(DateTime, nullable=True)
+    order_in_phase = Column(Integer, default=0, nullable=False)
+    suggested_date = Column(DateTime, nullable=True)
+    suggested_assignee = Column(String, nullable=True)
     created_by = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
