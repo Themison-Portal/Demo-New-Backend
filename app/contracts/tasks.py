@@ -27,6 +27,13 @@ class TaskResponse(BaseModel):
     visit_id: Optional[UUID] = None
     activity_type_id: Optional[UUID] = None
     category: Optional[str] = None
+    phase_id: Optional[str] = None
+    assigned_role: Optional[str] = None
+    blocked_reason: Optional[str] = None
+    blocked_since: Optional[datetime] = None
+    order_in_phase: Optional[int] = 0
+    suggested_date: Optional[datetime] = None
+    suggested_assignee: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -46,6 +53,13 @@ class TaskCreate(BaseModel):
     visit_id: Optional[UUID] = None
     activity_type_id: Optional[UUID] = None
     category: Optional[str] = None
+    phase_id: Optional[str] = None
+    assigned_role: Optional[str] = None
+    blocked_reason: Optional[str] = None
+    blocked_since: Optional[datetime] = None
+    order_in_phase: Optional[int] = 0
+    suggested_date: Optional[datetime] = None
+    suggested_assignee: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -62,6 +76,13 @@ class TaskUpdate(BaseModel):
     visit_id: Optional[UUID] = None
     activity_type_id: Optional[UUID] = None
     category: Optional[str] = None
+    phase_id: Optional[str] = None
+    assigned_role: Optional[str] = None
+    blocked_reason: Optional[str] = None
+    blocked_since: Optional[datetime] = None
+    order_in_phase: Optional[int] = None
+    suggested_date: Optional[datetime] = None
+    suggested_assignee: Optional[str] = None
 
     class Config:
         from_attributes = True

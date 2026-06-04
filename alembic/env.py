@@ -4,12 +4,16 @@ Reads DATABASE_URL from environment variables automatically.
 """
 
 import os
+import sys
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Add project root to sys.path so we can import app
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 config = context.config
 
@@ -34,6 +38,7 @@ from app.models.patient_visits import PatientVisit
 from app.models.patient_documents import PatientDocument
 from app.models.trial_patients import TrialPatient
 from app.models.tasks import Task
+from app.models.task_dependencies import TaskDependency
 from app.models.chat_sessions import ChatSession
 from app.models.chat_messages import ChatMessage
 from app.models.chat_threads import ChatThread
@@ -75,7 +80,9 @@ target_metadata = Base.metadata
 def get_url():
     url = os.getenv("DATABASE_URL", "")
     # Alembic needs sync driver — replace asyncpg with psycopg2
-    return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    if "asyncpg" in url:
+        return url.replace("asyncpg", "psycopg2")
+    return url
 
 
 def run_migrations_offline() -> None:
@@ -93,7 +100,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    configuration = config.get_section(config.config_ini_section)
+    configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = get_url()
 
     connectable = engine_from_config(
