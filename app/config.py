@@ -13,8 +13,13 @@ class Settings(BaseSettings):
     Application settings
     """
 
+    # Phase 6 of LLM consolidation: the BE no longer calls LLM providers
+    # directly. The RAG service owns OpenAI/Anthropic access. Both keys
+    # below are intentionally optional with empty defaults so cloud deploys
+    # can omit them entirely. The in-process RAG path (USE_GRPC_RAG=false)
+    # is no longer supported.
     openai_api_key: str = ""
-    anthropic_api_key: str = ""  # Required for Claude Opus 4.5
+    anthropic_api_key: str = ""
     database_url: str = ""  # PostgreSQL connection (asyncpg format)
     redis_url: str = ""
     frontend_url: str = "http://localhost:3000"  # Optional with default
@@ -68,7 +73,12 @@ class Settings(BaseSettings):
     # gRPC RAG Service configuration
     rag_service_address: str = "localhost:50051"  # Address of RAG gRPC service
     rag_service_timeout: float = 600.0  # gRPC timeout in seconds for RAG service calls
-    use_grpc_rag: bool = False  # Feature flag for gradual rollout
+    # Phase 6: gRPC RAG is now the only supported mode. Default flipped to
+    # True; the in-process _ingest_via_local / _query_via_local branches
+    # in upload.py and query.py are legacy and will fail if the BE no
+    # longer has an OPENAI_API_KEY set. Override to False only when
+    # specifically running against a stand-alone BE without RAG service.
+    use_grpc_rag: bool = True
     
     # Email Configuration
     sendgrid_api_key: str = ""

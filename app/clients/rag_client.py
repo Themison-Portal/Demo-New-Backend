@@ -22,6 +22,9 @@ from app.clients.generated.rag.v1.rag_service_pb2 import (
     InvalidateDocumentResponse,
     HealthCheckRequest,
     HealthCheckResponse,
+    GenerateRequest,
+    GenerateResponse,
+    GenerateMessage,
     BBox,
     INGEST_STAGE_COMPLETE,
     INGEST_STAGE_ERROR,
@@ -131,6 +134,71 @@ class RagClient:
             "created_at": result.created_at,
             "error": result.error if result.error else None,
         }
+
+    async def generate(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        model_hint: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: Optional[int] = None,
+        response_schema: Optional[Dict] = None,
+        response_schema_name: str = "structured_output",
+        feature_tag: str = "",
+    ) -> Dict:
+        """
+        Generic LLM completion via the RAG service's Generate RPC.
+
+        Use this for prompts that don't need document retrieval (e.g., wizard
+        structured-extraction, collaboration triage). Use `query()` for
+        RAG-grounded chat over a specific document.
+
+        Args:
+            messages: list of {"role": "system|user|assistant", "content": str}.
+            model_hint: "fast" | "smart" | None.
+            temperature: 0.0..1.0
+            max_tokens: cap on output tokens (None = server default).
+            response_schema: when provided, the model is forced to return JSON
+                             matching this JSON Schema; returned `content` is
+                             the JSON-serialized string.
+            response_schema_name: identifier passed to the provider (logged).
+            feature_tag: free-form tag for cost attribution / observability.
+
+        Returns:
+            {"content": str, "model": str, "prompt_tokens": int,
+             "completion_tokens": int}
+        """
+        await self._ensure_connected()
+
+        import json as _json
+
+        pb_messages = [
+            GenerateMessage(role=m["role"], content=m["content"])
+            for m in messages
+        ]
+        request = GenerateRequest(
+            messages=pb_messages,
+            model_hint=model_hint or "",
+            temperature=float(temperature) if temperature else 0.0,
+            max_tokens=int(max_tokens) if max_tokens else 0,
+            feature_tag=feature_tag or "",
+            response_schema_json=_json.dumps(response_schema) if response_schema else "",
+            response_schema_name=response_schema_name or "",
+        )
+
+        try:
+            response: GenerateResponse = await self._stub.Generate(
+                request, timeout=self.timeout
+            )
+            return {
+                "content": response.content,
+                "model": response.model,
+                "prompt_tokens": response.prompt_tokens,
+                "completion_tokens": response.completion_tokens,
+            }
+        except grpc.RpcError as e:
+            logger.error(f"Generate RPC error (feature={feature_tag}): {e}")
+            raise RuntimeError(f"RAG Service Generate error: {e.details()}")
 
     async def query(
         self,

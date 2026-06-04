@@ -55,6 +55,15 @@ from app.api.routes.api.collaboration_threads import (
     router as collaboration_threads_router,
 )
 
+# Wizard (LLM-backed protocol analysis) — Phase 2 of LLM consolidation
+from app.api.routes.api.wizard import router as wizard_router
+
+# Collaboration AI — Phase 3 of LLM consolidation
+from app.api.routes.api.collaboration_ai import router as collaboration_ai_router
+
+# Document AI — Phase 4 of LLM consolidation
+from app.api.routes.api.document_ai import router as document_ai_router
+
 
 # ─────────────────────────────────────────
 # Lifespan — Redis only, no self-healing
@@ -254,4 +263,27 @@ app.include_router(
     collaboration_threads_router,
     prefix="/api/collaboration-threads",
     tags=["collaboration-threads"],
+)
+
+# Wizard (Phase 2 of LLM consolidation) — replaces FE invokeLLM calls
+# in studySetupWizardRouter for protocol metadata + scaffold generation.
+app.include_router(wizard_router, prefix="/api/wizard", tags=["wizard"])
+
+# Collaboration AI (Phase 3) — replaces 5 FE invokeLLM call sites in
+# collaborationRouter (respond, draft-email, summarize-thread,
+# triage-email, suggest-resolution).
+app.include_router(
+    collaboration_ai_router,
+    prefix="/api/collaboration/ai",
+    tags=["collaboration-ai"],
+)
+
+# Document AI (Phase 4) — multi-document RAG chat (SSE-streamed when the
+# client asks for text/event-stream) + retry-ingestion that re-runs the
+# RAG service pipeline. Fixes the FE `Promise.allSettled[0]` bug by
+# picking the best response across multiple documents server-side.
+app.include_router(
+    document_ai_router,
+    prefix="/api/document-ai",
+    tags=["document-ai"],
 )
