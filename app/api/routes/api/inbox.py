@@ -116,6 +116,21 @@ async def inbox_counts(
     }
 
 
+@router.get("/config")
+async def get_inbox_config(
+    trial_id: Optional[str] = None,
+    member: Member = Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    return {
+        "id": str(member.organization_id),
+        "trialId": trial_id or str(member.organization_id),
+        "emailAddress": f"inbox-{str(member.organization_id)[:8]}@themison.local",
+        "isActive": True,
+        "createdAt": datetime.now().isoformat(),
+    }
+
+
 @router.post("/", status_code=201)
 async def create_inbox_message(
     payload: InboxMessageCreate,
