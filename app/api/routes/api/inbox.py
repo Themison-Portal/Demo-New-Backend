@@ -150,6 +150,7 @@ async def create_inbox_message(
         labels=payload.labels,
         folder=payload.folder,
         related_thread_id=payload.related_thread_id,
+        ai_summary=payload.ai_summary,
         received_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     db.add(msg)
@@ -273,7 +274,8 @@ async def reply_to_inbox_message(
         organization_id=member.organization_id,
         trial_id=original.trial_id,
         owner_id=member.profile_id,
-        sender_name=str(member.profile_id),
+        # sender_name=str(member.profile_id),
+        sender_name=member.name,
         sender_email=None,
         to_addresses=payload.to_addresses,
         cc_addresses=payload.cc_addresses,
