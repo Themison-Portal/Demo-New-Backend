@@ -87,16 +87,20 @@ async def _run_ingestion_task(
             )
             logger.info(f"Resolved GCS blob path to signed URL for job {job_id}")
 
-        if use_grpc:
-            # In Docker, the rag-service can't reach localhost:8000 (the backend).
-            # Translate to the Docker-internal hostname so it resolves correctly.
-            # GCS signed URLs (https://storage.googleapis.com/...) are unaffected.
-            grpc_url = document_url.replace("localhost:8000", "backend:8000")
+        # Translate local URLs (localhost/127.0.0.1 with any port) to the internal backend host and port (backend:8080)
+        # so that both the local container and the external RAG service container can resolve and download the file.
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(document_url)
+        if parsed.hostname in ("localhost", "127.0.0.1"):
+            parsed = parsed._replace(netloc="backend:8080")
+            document_url = urlunparse(parsed)
+            logger.info(f"Translated local document URL for container networking: {document_url}")
 
+        if use_grpc:
             # gRPC path - stream progress from RAG service
             await _ingest_via_grpc(
                 job_id=job_id,
-                document_url=grpc_url,
+                document_url=document_url,
                 document_id=document_id,
                 chunk_size=chunk_size,
                 job_service=job_service,
