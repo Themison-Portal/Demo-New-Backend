@@ -33,6 +33,36 @@ services:
       timeout: 5s
       retries: 5
 
+  # RAG service (gRPC) — separate image built from ../rag-service
+  # Shares the new-platform Postgres (themison_new) with the BE so the
+  # chunks table is the same one /query reads from.
+  rag-service:
+    build:
+      context: ../rag-service
+      dockerfile: Dockerfile
+    container_name: themison-new-rag-service
+    restart: unless-stopped
+    ports:
+      - "50052:50051" # host:container — 50052 on host to avoid clashing with the old themison-rag-service (50051)
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/themison_new
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GRPC_PORT: 50051
+      GRPC_MAX_WORKERS: 10
+      HYBRID_SEARCH_ENABLED: "true"
+      SEMANTIC_CACHE_SIMILARITY_THRESHOLD: "0.90"
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-20250514}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   # FastAPI Backend
   backend:
     build:
@@ -57,11 +87,14 @@ services:
       AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
       AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
       AUTH_DISABLED: ${AUTH_DISABLED:-false}
-      # RAG service — points to OLD existing RAG service, no new RAG needed
-      RAG_SERVICE_ADDRESS: ${RAG_SERVICE_ADDRESS:-localhost:50051}
-      USE_GRPC_RAG: ${USE_GRPC_RAG:-false}
-      # Local file URL for the RAG service to fetch uploaded PDFs from
-      LOCAL_STORAGE_BASE_URL: ${LOCAL_STORAGE_BASE_URL:-http://localhost:8000}
+      # RAG service — talks to the sibling rag-service container by Docker DNS.
+      # Phase 6: USE_GRPC_RAG is mandatory true; the in-process fallback is gone.
+      RAG_SERVICE_ADDRESS: ${RAG_SERVICE_ADDRESS:-rag-service:50051}
+      USE_GRPC_RAG: ${USE_GRPC_RAG:-true}
+      # Local file URL for the RAG service to fetch uploaded PDFs from.
+      # rag-service container reaches the BE container via Docker DNS at
+      # http://backend:8080 — no host.docker.internal trickery needed.
+      LOCAL_STORAGE_BASE_URL: ${LOCAL_STORAGE_BASE_URL:-http://backend:8080}
       # CORS
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       ALLOW_ALL_ORIGINS: ${ALLOW_ALL_ORIGINS:-true}
@@ -72,11 +105,56 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rag-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 30s
+
+  # FE (Vite React client + Express tRPC server) — separate image built
+  # from the FE repo's production Dockerfile. Shares the docker-compose
+  # network with backend + rag-service so internal DNS works.
+  # FE MySQL stays where it is (themison-fe-mysql in the old core-backendv4
+  # compose) — reachable via host.docker.internal:3306 from inside this
+  # container.
+  frontend:
+    build:
+      context: ../NewFE/Demo-New-Frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_AUTH0_DOMAIN: ${VITE_AUTH0_DOMAIN:-}
+        VITE_AUTH0_CLIENT_ID: ${VITE_AUTH0_CLIENT_ID:-}
+        VITE_AUTH0_AUDIENCE: ${VITE_AUTH0_AUDIENCE:-}
+        VITE_AUTH0_REDIRECT_URI: ${VITE_AUTH0_REDIRECT_URI:-}
+        VITE_APP_ID: ${VITE_APP_ID:-}
+        VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL:-}
+    container_name: themison-new-frontend
+    restart: unless-stopped
+    ports:
+      - "3002:3000" # host:container — match the dev-server host port
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # FE MySQL is still in the old core-backendv4 compose project.
+      # Reach it via the host gateway.
+      DATABASE_URL: ${FE_DATABASE_URL:-mysql://themison:themison@host.docker.internal:3306/themison_fe}
+      # BE reached by Docker DNS (sibling service in this compose).
+      NEXT_PUBLIC_API_URL: http://backend:8080
+      CORE_BACKEND_API_URL: http://backend:8080
+      CORE_BACKEND_API_KEY: ${UPLOAD_API_KEY}
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
+      PUBLIC_BASE_URL: ${FE_PUBLIC_BASE_URL:-http://localhost:3002}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
       start_period: 30s
 
 volumes:
