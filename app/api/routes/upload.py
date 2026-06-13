@@ -131,13 +131,18 @@ async def _ingest_via_grpc(
     job_service: JobStatusService,
     grpc_address: str,
 ):
-    """Ingest PDF using gRPC RAG Service with progress streaming."""
-    from app.clients.rag_client import RagClient
+    """Ingest PDF using the RAG service (gRPC or HTTP, selected by config)."""
+    from app.clients.rag_client import get_rag_client
 
-    client = RagClient(grpc_address)
+    # Transport selection happens in get_rag_client() based on settings.use_grpc_rag.
+    # grpc_address argument is kept in the signature for backwards compat but is
+    # only used when the singleton has not been built yet AND grpc is selected;
+    # in practice both clients read settings directly.
+    client = get_rag_client()
     result = None
 
-    # Map protobuf IngestStage enum ints to string names
+    # Map gRPC IngestStage enum ints to lowercase stage names. The HTTP client
+    # already yields stage as a string, so we accept either shape.
     _STAGE_NAMES = {
         0: "unspecified", 1: "downloading", 2: "parsing",
         3: "chunking", 4: "embedding", 5: "storing",
@@ -153,9 +158,12 @@ async def _ingest_via_grpc(
         if not status_set:
             await _set_ingestion_status(document_id, "processing")
             status_set = True
-        # Map gRPC progress to job status
+        # Map gRPC int enum or HTTP string to a normalized lowercase stage label.
         raw_stage = progress.get("stage", 0)
-        stage = _STAGE_NAMES.get(raw_stage, str(raw_stage))
+        if isinstance(raw_stage, int):
+            stage = _STAGE_NAMES.get(raw_stage, str(raw_stage))
+        else:
+            stage = str(raw_stage).lower()
         percent = progress.get("progress_percent", 0)
         message = progress.get("message", "")
 

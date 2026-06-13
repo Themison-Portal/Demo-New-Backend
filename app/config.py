@@ -70,15 +70,19 @@ class Settings(BaseSettings):
     contextual_retrieval_enabled: bool = False
     contextual_context_window: int = 3  # Include N surrounding chunks for context
 
-    # gRPC RAG Service configuration
-    rag_service_address: str = "localhost:50051"  # Address of RAG gRPC service
-    rag_service_timeout: float = 600.0  # gRPC timeout in seconds for RAG service calls
-    # Phase 6: gRPC RAG is now the only supported mode. Default flipped to
-    # True; the in-process _ingest_via_local / _query_via_local branches
-    # in upload.py and query.py are legacy and will fail if the BE no
-    # longer has an OPENAI_API_KEY set. Override to False only when
-    # specifically running against a stand-alone BE without RAG service.
-    use_grpc_rag: bool = True
+    # RAG Service connection.
+    #
+    # `rag_service_address` accepts two shapes:
+    #   - HTTP (default):  http://host:8000  /  https://<render-host>  (any path-less URL)
+    #   - gRPC fallback:   host:50051        /  <render-host>:443      (bare host:port)
+    #
+    # Transport selection is done by `use_grpc_rag`; the gRPC client lives in
+    # rag_client.py and the HTTP client in rag_http_client.py — both expose the
+    # same async interface, so call sites in app/api/routes/** don't care which
+    # transport is active.
+    rag_service_address: str = "http://localhost:8000"
+    rag_service_timeout: float = 600.0  # seconds, applies to both transports
+    use_grpc_rag: bool = False
     
     # Email Configuration
     sendgrid_api_key: str = ""

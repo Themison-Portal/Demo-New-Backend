@@ -33,7 +33,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # RAG service (gRPC) — separate image built from ../rag-service
+  # RAG service — separate image built from ../rag-service.
+  # Defaults to HTTP on 8000; set TRANSPORT=grpc to fall back.
   # Shares the new-platform Postgres (themison_new) with the BE so the
   # chunks table is the same one /query reads from.
   rag-service:
@@ -43,8 +44,10 @@ services:
     container_name: themison-new-rag-service
     restart: unless-stopped
     ports:
-      - "50052:50051" # host:container — 50052 on host to avoid clashing with the old themison-rag-service (50051)
+      - "8001:8000" # host:container — 8001 on host to avoid clashing with other locally-running HTTP services
     environment:
+      TRANSPORT: ${RAG_TRANSPORT:-http}
+      HTTP_PORT: 8000
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/themison_new
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
@@ -57,7 +60,7 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -88,9 +91,10 @@ services:
       AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
       AUTH_DISABLED: ${AUTH_DISABLED:-false}
       # RAG service — talks to the sibling rag-service container by Docker DNS.
-      # Phase 6: USE_GRPC_RAG is mandatory true; the in-process fallback is gone.
-      RAG_SERVICE_ADDRESS: ${RAG_SERVICE_ADDRESS:-rag-service:50051}
-      USE_GRPC_RAG: ${USE_GRPC_RAG:-true}
+      # Default transport is HTTP on :8000. Set USE_GRPC_RAG=true and adjust the
+      # address to `rag-service:50051` to use the gRPC fallback.
+      RAG_SERVICE_ADDRESS: ${RAG_SERVICE_ADDRESS:-http://rag-service:8000}
+      USE_GRPC_RAG: ${USE_GRPC_RAG:-false}
       # Local file URL for the RAG service to fetch uploaded PDFs from.
       # rag-service container reaches the BE container via Docker DNS at
       # http://backend:8080 — no host.docker.internal trickery needed.

@@ -359,15 +359,33 @@ class RagClient:
             }
 
 
-# Singleton instance
-_rag_client: Optional[RagClient] = None
+# Singleton instance — typed as Any so the HTTP client variant slots in
+# without changing the public type. Both variants expose the same async
+# methods + return shapes (ingest_pdf, query, generate, get_highlighted_pdf,
+# invalidate_document, health_check, close).
+_rag_client: Optional[object] = None
 
 
-def get_rag_client() -> RagClient:
-    """Get the RAG client singleton."""
+def get_rag_client():
+    """
+    Return the RAG client singleton.
+
+    Transport selection:
+      - settings.use_grpc_rag == True  → gRPC `RagClient` (this module).
+      - settings.use_grpc_rag == False → HTTP `RagHttpClient` (rag_http_client.py).
+
+    Default is HTTP. Both clients have the same public interface, so all
+    call sites in `app/api/routes/**` work unchanged.
+    """
     global _rag_client
     if _rag_client is None:
-        _rag_client = RagClient()
+        settings = get_settings()
+        if settings.use_grpc_rag:
+            _rag_client = RagClient()
+        else:
+            from app.clients.rag_http_client import RagHttpClient
+
+            _rag_client = RagHttpClient()
     return _rag_client
 
 
