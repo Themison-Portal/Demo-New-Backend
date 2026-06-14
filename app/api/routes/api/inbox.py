@@ -275,7 +275,9 @@ async def reply_to_inbox_message(
         trial_id=original.trial_id,
         owner_id=member.profile_id,
         # sender_name=str(member.profile_id),
-        sender_name=member.name,
+        sender_name=(
+            member.name if hasattr(member, "name") and member.name else "Demo User"
+        ),
         sender_email=None,
         to_addresses=payload.to_addresses,
         cc_addresses=payload.cc_addresses,
