@@ -26,8 +26,11 @@ def _singleton() -> StorageService:
 
     from app.services.storage.local_service import LocalStorageService
 
-    logger.info("GCS not configured — using local filesystem storage (./uploads/)")
-    return LocalStorageService()
+    logger.info(
+        "GCS not configured — using local filesystem storage (./uploads/, base_url=%s)",
+        settings.local_storage_base_url,
+    )
+    return LocalStorageService(base_url=settings.local_storage_base_url)
 
 
 def get_storage_service() -> StorageService:

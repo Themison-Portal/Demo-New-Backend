@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     gcs_bucket_patient_documents: str = ""
     gcs_credentials_path: str = ""
 
+    # Local-filesystem storage fallback (used when GCS isn't configured).
+    # Must be reachable both from inside this container and from the RAG
+    # service container. Use host.docker.internal:<host_port> for
+    # cross-compose Docker Desktop setups.
+    local_storage_base_url: str = "http://localhost:8000"
+
     # Semantic cache configuration
     semantic_cache_similarity_threshold: float = 0.90  # Cosine similarity threshold for cache hits
 

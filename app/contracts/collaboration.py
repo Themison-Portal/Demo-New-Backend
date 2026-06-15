@@ -23,6 +23,7 @@ class InboxMessageCreate(BaseModel):
     body: str
     labels: List[str] = []
     folder: str = "inbox"
+    ai_summary: Optional[str] = None
     related_thread_id: Optional[UUID] = None
 
 

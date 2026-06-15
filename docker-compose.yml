@@ -60,6 +60,8 @@ services:
       # RAG service — points to OLD existing RAG service, no new RAG needed
       RAG_SERVICE_ADDRESS: ${RAG_SERVICE_ADDRESS:-localhost:50051}
       USE_GRPC_RAG: ${USE_GRPC_RAG:-false}
+      # Local file URL for the RAG service to fetch uploaded PDFs from
+      LOCAL_STORAGE_BASE_URL: ${LOCAL_STORAGE_BASE_URL:-http://localhost:8000}
       # CORS
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       ALLOW_ALL_ORIGINS: ${ALLOW_ALL_ORIGINS:-true}
