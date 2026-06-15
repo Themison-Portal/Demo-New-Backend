@@ -104,7 +104,7 @@ async def inbox_counts(
 
     draft = (
         await db.execute(
-            select(func.count()).where(base, InboxMessage.folder == "draft")
+            select(func.count()).where(base, InboxMessage.folder == "drafts")
         )
     ).scalar()
 
@@ -113,6 +113,21 @@ async def inbox_counts(
         "unread": unread,
         "sent": sent,
         "draft": draft,
+    }
+
+
+@router.get("/config")
+async def get_inbox_config(
+    trial_id: Optional[str] = None,
+    member: Member = Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    return {
+        "id": str(member.organization_id),
+        "trialId": trial_id or str(member.organization_id),
+        "emailAddress": f"inbox-{str(member.organization_id)[:8]}@themison.local",
+        "isActive": True,
+        "createdAt": datetime.now().isoformat(),
     }
 
 
@@ -135,6 +150,7 @@ async def create_inbox_message(
         labels=payload.labels,
         folder=payload.folder,
         related_thread_id=payload.related_thread_id,
+        ai_summary=payload.ai_summary,
         received_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
     db.add(msg)
@@ -258,7 +274,10 @@ async def reply_to_inbox_message(
         organization_id=member.organization_id,
         trial_id=original.trial_id,
         owner_id=member.profile_id,
-        sender_name=str(member.profile_id),
+        # sender_name=str(member.profile_id),
+        sender_name=(
+            member.name if hasattr(member, "name") and member.name else "Demo User"
+        ),
         sender_email=None,
         to_addresses=payload.to_addresses,
         cc_addresses=payload.cc_addresses,
