@@ -58,6 +58,7 @@ async def _run_ingestion_task(
     redis_client,
     use_grpc: bool,
     grpc_address: str,
+    use_local: bool = False,
 ):
     """
     Background task for PDF ingestion.
@@ -96,8 +97,12 @@ async def _run_ingestion_task(
             document_url = urlunparse(parsed)
             logger.info(f"Translated local document URL for container networking: {document_url}")
 
-        if use_grpc:
-            # gRPC path - stream progress from RAG service
+        if not use_local:
+            # Delegate ingestion to the rag-service. The transport (HTTP vs gRPC)
+            # is chosen inside get_rag_client() from settings.use_grpc_rag, so HTTP
+            # delegation works even when use_grpc_rag is False. This keeps heavy
+            # docling/ML work OUT of this backend process (avoids the 512MB OOM)
+            # and ensures ingestion and querying share the rag-service's store.
             await _ingest_via_grpc(
                 job_id=job_id,
                 document_url=document_url,
@@ -107,7 +112,7 @@ async def _run_ingestion_task(
                 grpc_address=grpc_address,
             )
         else:
-            # Local path - run ingestion with progress updates
+            # In-process docling ingestion (local dev only; memory-heavy).
             await _ingest_via_local(
                 job_id=job_id,
                 document_url=document_url,
@@ -365,6 +370,7 @@ async def upload_pdf_document(
         redis_client=redis_client,
         use_grpc=settings.use_grpc_rag,
         grpc_address=settings.rag_service_address,
+        use_local=settings.rag_local_ingestion,
     )
 
     logger.info(f"Queued ingestion job {job_id} for document {body.document_id}")

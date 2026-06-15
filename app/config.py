@@ -83,7 +83,17 @@ class Settings(BaseSettings):
     rag_service_address: str = "http://localhost:8000"
     rag_service_timeout: float = 600.0  # seconds, applies to both transports
     use_grpc_rag: bool = False
-    
+
+    # Where PDF ingestion runs. This is INDEPENDENT of `use_grpc_rag` (which only
+    # selects HTTP vs gRPC transport):
+    #   - False (default): delegate ingestion to the rag-service (over the
+    #     transport `use_grpc_rag` selects). Heavy docling/ML work stays out of
+    #     this backend process, and ingestion + querying share the rag-service's
+    #     store so chat reliably finds the chunks.
+    #   - True: run docling ingestion IN-PROCESS here (local dev with no
+    #     rag-service available). Memory-heavy — not for the 512MB Render tier.
+    rag_local_ingestion: bool = False
+
     # Email Configuration
     sendgrid_api_key: str = ""
     email_from: str = "noreply@themison.com"
