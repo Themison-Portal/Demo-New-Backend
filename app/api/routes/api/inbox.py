@@ -104,7 +104,7 @@ async def inbox_counts(
 
     draft = (
         await db.execute(
-            select(func.count()).where(base, InboxMessage.folder == "draft")
+            select(func.count()).where(base, InboxMessage.folder == "drafts")
         )
     ).scalar()
 
