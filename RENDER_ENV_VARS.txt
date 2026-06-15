@@ -29,7 +29,7 @@ TRANSPORT=http
 # GRPC_PORT=50051
 
 # ─── Optional (code defaults are fine for most deployments) ──────────────────
-LLM_MODEL=claude-sonnet-4-20250514
+LLM_MODEL=claude-sonnet-4-6
 GRPC_MAX_WORKERS=10
 HYBRID_SEARCH_ENABLED=true
 SEMANTIC_CACHE_SIMILARITY_THRESHOLD=0.90

@@ -46,7 +46,7 @@ class ContextualService:
 
     def __init__(
         self,
-        model: str = "claude-sonnet-4-20250514",  # Cost-effective for summaries
+        model: str = "claude-sonnet-4-6",  # Cost-effective for summaries
         max_tokens: int = 100
     ):
         self.model = model
