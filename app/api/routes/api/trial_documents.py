@@ -7,6 +7,7 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import LargeBinary, bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -162,6 +163,25 @@ async def upload_trial_document(
         filename=unique_filename,
         content_type=file.content_type or "application/octet-stream",
         folder=folder,
+    )
+
+    # Durable fallback: also store the bytes in Postgres so the PDF survives the
+    # ephemeral /app/uploads disk being wiped on redeploy. Keyed by the same
+    # relative path the /local-files URL resolves to; served by the /local-files
+    # route when the on-disk copy is gone.
+    rel_path = f"{folder}/{unique_filename}"
+    await db.execute(
+        text(
+            "INSERT INTO document_blobs (rel_path, content, content_type) "
+            "VALUES (:rel_path, :content, :content_type) "
+            "ON CONFLICT (rel_path) DO UPDATE SET "
+            "content = EXCLUDED.content, content_type = EXCLUDED.content_type"
+        ).bindparams(bindparam("content", type_=LargeBinary)),
+        {
+            "rel_path": rel_path,
+            "content": file_data,
+            "content_type": file.content_type or "application/pdf",
+        },
     )
 
     doc = Document(

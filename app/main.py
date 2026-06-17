@@ -87,6 +87,28 @@ async def lifespan(app: FastAPI):
         logging.error(f"Redis connection failed: {e}")
         app.state.redis_client = None
 
+    # Ensure the durable document-blob table exists (Postgres fallback for
+    # uploaded PDFs, so files survive the ephemeral /app/uploads disk being
+    # wiped on every redeploy/restart). Idempotent — safe to run each boot.
+    try:
+        from app.db.session import engine as _engine
+        from sqlalchemy import text as _text
+
+        if _engine is not None:
+            async with _engine.begin() as conn:
+                await conn.execute(
+                    _text(
+                        "CREATE TABLE IF NOT EXISTS document_blobs ("
+                        "rel_path TEXT PRIMARY KEY, "
+                        "content BYTEA NOT NULL, "
+                        "content_type TEXT, "
+                        "created_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+                    )
+                )
+            logging.info("document_blobs table ready.")
+    except Exception as e:
+        logging.error(f"Failed to ensure document_blobs table: {e}")
+
     yield
 
     if redis_client:
