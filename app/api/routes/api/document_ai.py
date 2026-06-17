@@ -86,6 +86,7 @@ def _flatten_sources(
                     page=s.get("page") if isinstance(s.get("page"), int) else None,
                     excerpt=s.get("exactText") or "",
                     relevance=s.get("relevance"),
+                    bboxes=s.get("bboxes") or [],
                 )
             )
     return flat

@@ -49,6 +49,7 @@ class ChatSource(_CamelModel):
     page: Optional[int] = None
     excerpt: str
     relevance: Optional[str] = None  # high/medium/low
+    bboxes: List[List[float]] = Field(default_factory=list)  # docling coords for PDF highlighting
 
 
 class ChatResponse(_CamelModel):
