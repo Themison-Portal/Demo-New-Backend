@@ -32,7 +32,7 @@ class PDFHighlightService(IPDFHightlightService):
         ).hexdigest()[:10]
 
         cache_key = (
-            f"pdf_hl_full:{hashlib.sha1(doc_url.encode()).hexdigest()[:10]}"
+            f"pdf_hl:{hashlib.sha1(doc_url.encode()).hexdigest()[:10]}"
             f":p{page}:{bboxes_hash}"
         )
 
@@ -63,23 +63,18 @@ class PDFHighlightService(IPDFHightlightService):
 
                 # Normalize bbox
                 x0, x1 = sorted([x0, x1])
-                # Don't sort y — keep original order from Docling BOTTOMLEFT
-                # y0=top (larger value), y1=bottom (smaller value) in BOTTOMLEFT                     
-                x0, y_bottom, x1, height = map(float, bbox)
-                # y_bottom is distance from bottom, height is the text block height
-                y0_fitz = page_height - y_bottom - height  # top in fitz coords
-                y1_fitz = page_height - y_bottom  
-                # Convert Docling (top-left) → PDF (bottom-left)
-                target_rect = fitz.Rect(x0, y0_fitz, x1, y1_fitz)
-                
-                # Guard: skip invalid rects
-                if target_rect.is_empty or target_rect.is_infinite or y0_fitz >= y1_fitz:
-                    print(f"[HL] Skipping invalid rect: {target_rect}")
-                    continue
+                y0, y1 = sorted([y0, y1])
 
-                print(f"[HL] page_height={page_height:.1f} bbox_in={bbox}")
-                print(f"[HL] fitz_rect=({x0:.1f},{y0_fitz:.1f},{x1:.1f},{y1_fitz:.1f})")
-                print(f"[HL] rect_empty={target_rect.is_empty} rect_infinite={target_rect.is_infinite}")
+                # Convert Docling (top-left) → PDF (bottom-left)
+                target_rect = fitz.Rect(
+                    x0,
+                    page_height - y1,
+                    x1,
+                    page_height - y0,
+                )
+
+                if target_rect.is_empty or target_rect.is_infinite:
+                    continue
 
                 # Smart highlight: expand to text blocks if overlapping
                 blocks = page_obj.get_text("blocks")
@@ -98,8 +93,6 @@ class PDFHighlightService(IPDFHightlightService):
                     annot.update()
 
             # 5️⃣ Serialize and cache
-             # Normalize the highlighted page rect to prevent size inconsistency
-            
             pdf_bytes = doc_pdf.tobytes(garbage=3, clean=True, deflate=True)
             await self.redis.set(cache_key, pdf_bytes, ex=3600)
 
