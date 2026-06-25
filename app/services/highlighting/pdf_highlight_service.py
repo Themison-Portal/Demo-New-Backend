@@ -32,7 +32,7 @@ class PDFHighlightService(IPDFHightlightService):
         ).hexdigest()[:10]
 
         cache_key = (
-            f"pdf_hl:{hashlib.sha1(doc_url.encode()).hexdigest()[:10]}"
+            f"pdf_hl_full:{hashlib.sha1(doc_url.encode()).hexdigest()[:10]}"
             f":p{page}:{bboxes_hash}"
         )
 
@@ -63,17 +63,18 @@ class PDFHighlightService(IPDFHightlightService):
 
                 # Normalize bbox
                 x0, x1 = sorted([x0, x1])
-                y0, y1 = sorted([y0, y1])
-
+                # Don't sort y — keep original order from Docling BOTTOMLEFT
+                # y0=top (larger value), y1=bottom (smaller value) in BOTTOMLEFT                     
+                x0, y_bottom, x1, height = map(float, bbox)
+                # y_bottom is distance from bottom, height is the text block height
+                y0_fitz = page_height - y_bottom - height  # top in fitz coords
+                y1_fitz = page_height - y_bottom  
                 # Convert Docling (top-left) → PDF (bottom-left)
-                target_rect = fitz.Rect(
-                    x0,
-                    page_height - y1,
-                    x1,
-                    page_height - y0,
-                )
-
-                if target_rect.is_empty or target_rect.is_infinite:
+                target_rect = fitz.Rect(x0, y0_fitz, x1, y1_fitz)
+                
+                # Guard: skip invalid rects
+                if target_rect.is_empty or target_rect.is_infinite or y0_fitz >= y1_fitz:
+                    print(f"[HL] Skipping invalid rect: {target_rect}")
                     continue
 
                 # Smart highlight: expand to text blocks if overlapping
