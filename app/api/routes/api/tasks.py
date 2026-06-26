@@ -3,7 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models.tasks import Task
 from app.models.members import Member
@@ -104,7 +104,12 @@ async def create_task(
     member: Member = Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    task = Task(**payload.model_dump(), created_by=member.id)
+    data = payload.model_dump()
+    for key, val in data.items():
+        if isinstance(val, datetime) and val.tzinfo is not None:
+            data[key] = val.astimezone(timezone.utc).replace(tzinfo=None)
+
+    task = Task(**data, created_by=member.id)
 
     db.add(task)
     await db.commit()
@@ -159,7 +164,12 @@ async def update_task(
     if not task or task.deleted_at:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    for key, val in data.items():
+        if isinstance(val, datetime) and val.tzinfo is not None:
+            data[key] = val.astimezone(timezone.utc).replace(tzinfo=None)
+
+    for key, value in data.items():
         setattr(task, key, value)
 
     task.updated_at = datetime.utcnow()
