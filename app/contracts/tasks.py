@@ -20,7 +20,7 @@ class TaskResponse(BaseModel):
     description: Optional[str] = None
     status: str
     priority: Optional[str] = None
-    due_date: Optional[date] = None
+    due_date: Optional[datetime] = None
     assigned_to: Optional[UUID] = None
     assigned_user: Optional[AssignedUser] = None
     patient_id: Optional[UUID] = None
@@ -48,7 +48,7 @@ class TaskCreate(BaseModel):
     status: Optional[str] = "todo"
     priority: Optional[str] = None
     assigned_to: Optional[UUID] = None
-    due_date: Optional[date] = None
+    due_date: Optional[datetime] = None
     patient_id: Optional[UUID] = None
     visit_id: Optional[UUID] = None
     activity_type_id: Optional[UUID] = None
@@ -71,7 +71,7 @@ class TaskUpdate(BaseModel):
     status: Optional[str] = None
     priority: Optional[str] = None
     assigned_to: Optional[UUID] = None
-    due_date: Optional[date] = None
+    due_date: Optional[datetime] = None
     patient_id: Optional[UUID] = None
     visit_id: Optional[UUID] = None
     activity_type_id: Optional[UUID] = None
