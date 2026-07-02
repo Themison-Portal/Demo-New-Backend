@@ -58,12 +58,23 @@ class PDFHighlightService(IPDFHightlightService):
             # 4️⃣ exact_text search highlighting (precise)
             if exact_text:
                 import re
-                clean_text = re.sub(r'\s+', ' ', exact_text.strip())
+                # Clean up leading/trailing quotes, smart quotes, and whitespace
+                clean_text = exact_text.strip().strip('"\'“”‘’')
+                clean_text = re.sub(r'\s+', ' ', clean_text)
                 if clean_text:
                     matches = page_obj.search_for(clean_text)
-                    # Fallback for longer query results: search for first 80 chars
+                    
+                    # Fallback 1: if clean_text is long, try the first 80 characters
                     if not matches and len(clean_text) > 100:
                         matches = page_obj.search_for(clean_text[:80])
+                    
+                    # Fallback 2: try the first 50 characters
+                    if not matches and len(clean_text) > 60:
+                        matches = page_obj.search_for(clean_text[:50])
+                        
+                    # Fallback 3: try the last 50 characters
+                    if not matches and len(clean_text) > 60:
+                        matches = page_obj.search_for(clean_text[-50:])
                     
                     if matches:
                         for rect in matches:
