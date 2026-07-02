@@ -38,10 +38,14 @@ class PDFHighlightService(IPDFHightlightService):
             f":p{page}:{hash_val}"
         )
 
-        # 2️⃣ Redis cache
-        cached = await self.redis.get(cache_key)
-        if cached:
-            return cached
+        # 2️⃣ Redis cache (fail-safe)
+        try:
+            cached = await self.redis.get(cache_key)
+            if cached:
+                return cached
+        except Exception as cache_err:
+            import logging
+            logging.getLogger("uvicorn").warning(f"Redis cache get failed: {cache_err}")
 
         # 3️⃣ Load PDF
         doc_pdf = await self._get_pdf_from_url(doc_url)
@@ -53,6 +57,7 @@ class PDFHighlightService(IPDFHightlightService):
             page_obj = doc_pdf[page - 1]
             page_height = page_obj.rect.height
 
+            # Ensure all stroke colors are set to yellow [1, 1, 0] when highlighting
             highlight_applied = False
 
             # 4️⃣ exact_text search highlighting (precise)
@@ -79,6 +84,7 @@ class PDFHighlightService(IPDFHightlightService):
                     if matches:
                         for rect in matches:
                             annot = page_obj.add_highlight_annot(rect)
+                            annot.set_colors(stroke=[1, 1, 0])
                             annot.update()
                         highlight_applied = True
 
@@ -106,12 +112,19 @@ class PDFHighlightService(IPDFHightlightService):
                         continue
 
                     annot = page_obj.add_highlight_annot(target_rect)
+                    annot.set_colors(stroke=[1, 1, 0])
                     annot.update()
                     highlight_applied = True
 
             # 6️⃣ Serialize and cache
             pdf_bytes = doc_pdf.tobytes(garbage=3, clean=True, deflate=True)
-            await self.redis.set(cache_key, pdf_bytes, ex=3600)
+            
+            # Cache the result (fail-safe)
+            try:
+                await self.redis.set(cache_key, pdf_bytes, ex=3600)
+            except Exception as cache_err:
+                import logging
+                logging.getLogger("uvicorn").warning(f"Redis cache set failed: {cache_err}")
 
             return pdf_bytes
 
