@@ -9,6 +9,15 @@ class PDFHighlightService(IPDFHightlightService):
         
 
     async def _get_pdf_from_url(self, url: str) -> fitz.Document:
+        from app.config import get_settings
+        settings = get_settings()
+
+        # Self-healing: replace localhost/127.0.0.1 with the actual configured local_storage_base_url
+        if "localhost" in url or "127.0.0.1" in url:
+            import re
+            base_url = settings.local_storage_base_url.rstrip("/")
+            url = re.sub(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?", base_url, url)
+
         async with httpx.AsyncClient() as client:
             resp = await client.get(url)
             resp.raise_for_status()
