@@ -97,17 +97,17 @@ class PDFHighlightService(IPDFHightlightService):
                             annot.update()
                         highlight_applied = True
 
-            # 5️⃣ bboxes coordinate highlighting with bottom-left to top-left translation
-            if bboxes:
+            # 5️⃣ bboxes coordinate highlighting with top-left coordinates (no translation needed)
+            if bboxes and not highlight_applied:
                 for bbox in bboxes:
                     if not bbox or len(bbox) != 4:
                         continue
 
                     x0, y0, x1, y1 = map(float, bbox)
 
-                    # Docling coordinates are BOTTOM-LEFT (y increases bottom-to-top).
-                    # fitz coordinates are TOP-LEFT (y increases top-to-bottom).
-                    y0_fitz, y1_fitz = sorted([page_height - y0, page_height - y1])
+                    # Docling and fitz coordinates are both TOP-LEFT (y increases top-to-bottom).
+                    # No conversion/flipping is needed.
+                    y0_fitz, y1_fitz = sorted([y0, y1])
                     x0_fitz, x1_fitz = sorted([x0, x1])
 
                     target_rect = fitz.Rect(
