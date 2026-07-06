@@ -19,7 +19,7 @@ class PDFHighlightService(IPDFHightlightService):
             url = re.sub(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?", base_url, url)
 
         async with httpx.AsyncClient() as client:
-            resp = await client.get(url)
+            resp = await client.get(url, follow_redirects=True)
             resp.raise_for_status()
             pdf_bytes = resp.content
             # Open PDF from bytes
@@ -36,15 +36,34 @@ class PDFHighlightService(IPDFHightlightService):
     ) -> bytes:
         
 
+        # Fetch headers to check ETag / Last-Modified for cache invalidation when files change
+        etag = ""
+        try:
+            async with httpx.AsyncClient() as client:
+                resolved_url = doc_url
+                if "localhost" in resolved_url or "127.0.0.1" in resolved_url:
+                    import re
+                    from app.config import get_settings
+                    settings = get_settings()
+                    base_url = settings.local_storage_base_url.rstrip("/")
+                    resolved_url = re.sub(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?", base_url, resolved_url)
+
+                head_resp = await client.head(resolved_url, follow_redirects=True)
+                if head_resp.status_code == 200:
+                    etag = head_resp.headers.get("etag") or head_resp.headers.get("last-modified") or ""
+        except Exception:
+            pass
+
         # 1️⃣ Build deterministic cache key
         bboxes_repr = json.dumps(bboxes or [], sort_keys=True)
         exact_text_repr = exact_text or ""
         hash_input = f"{bboxes_repr}:{exact_text_repr}"
         hash_val = hashlib.sha1(hash_input.encode()).hexdigest()[:10]
+        etag_hash = hashlib.sha1(etag.encode()).hexdigest()[:8]
 
         cache_key = (
             f"pdf_hl_full:{hashlib.sha1(doc_url.encode()).hexdigest()[:10]}"
-            f":p{page}:{hash_val}"
+            f":p{page}:{hash_val}:{etag_hash}"
         )
 
         # 2️⃣ Redis cache (fail-safe)
@@ -83,11 +102,11 @@ class PDFHighlightService(IPDFHightlightService):
                         matches = page_obj.search_for(clean_text[:80])
                     
                     # Fallback 2: try the first 50 characters
-                    if not matches and len(clean_text) > 60:
+                    if not matches and len(clean_text) > 50:
                         matches = page_obj.search_for(clean_text[:50])
                         
                     # Fallback 3: try the last 50 characters
-                    if not matches and len(clean_text) > 60:
+                    if not matches and len(clean_text) > 50:
                         matches = page_obj.search_for(clean_text[-50:])
                     
                     if matches:
@@ -105,9 +124,13 @@ class PDFHighlightService(IPDFHightlightService):
 
                     x0, y0, x1, y1 = map(float, bbox)
 
-                    # Docling and fitz coordinates are both TOP-LEFT (y increases top-to-bottom).
-                    # No conversion/flipping is needed.
-                    y0_fitz, y1_fitz = sorted([y0, y1])
+                    # Docling uses BOTTOM-LEFT coordinates (y increases bottom-to-top),
+                    # while fitz uses TOP-LEFT coordinates (y increases top-to-bottom).
+                    # We must translate the y-coordinates: y_fitz = page_height - y_docling.
+                    y0_fitz = page_height - y0
+                    y1_fitz = page_height - y1
+
+                    y0_fitz, y1_fitz = sorted([y0_fitz, y1_fitz])
                     x0_fitz, x1_fitz = sorted([x0, x1])
 
                     target_rect = fitz.Rect(
