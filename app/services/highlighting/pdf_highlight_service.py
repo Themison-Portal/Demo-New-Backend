@@ -88,36 +88,8 @@ class PDFHighlightService(IPDFHightlightService):
             # Ensure all stroke colors are set to yellow [1, 1, 0] when highlighting
             highlight_applied = False
 
-            # 4️⃣ exact_text search highlighting (precise)
-            if exact_text:
-                import re
-                # Clean up leading/trailing quotes, smart quotes, and whitespace
-                clean_text = exact_text.strip().strip('"\'“”‘’')
-                clean_text = re.sub(r'\s+', ' ', clean_text)
-                if clean_text:
-                    matches = page_obj.search_for(clean_text)
-                    
-                    # Fallback 1: if clean_text is long, try the first 80 characters
-                    if not matches and len(clean_text) > 100:
-                        matches = page_obj.search_for(clean_text[:80])
-                    
-                    # Fallback 2: try the first 50 characters
-                    if not matches and len(clean_text) > 50:
-                        matches = page_obj.search_for(clean_text[:50])
-                        
-                    # Fallback 3: try the last 50 characters
-                    if not matches and len(clean_text) > 50:
-                        matches = page_obj.search_for(clean_text[-50:])
-                    
-                    if matches:
-                        for rect in matches:
-                            annot = page_obj.add_highlight_annot(rect)
-                            annot.set_colors(stroke=[1, 1, 0])
-                            annot.update()
-                        highlight_applied = True
-
-            # 5️⃣ bboxes coordinate highlighting with top-left coordinates (no translation needed)
-            if bboxes and not highlight_applied:
+            # 4️⃣ bboxes coordinate highlighting with bottom-left to top-left translation
+            if bboxes:
                 for bbox in bboxes:
                     if not bbox or len(bbox) != 4:
                         continue
@@ -147,6 +119,34 @@ class PDFHighlightService(IPDFHightlightService):
                     annot.set_colors(stroke=[1, 1, 0])
                     annot.update()
                     highlight_applied = True
+
+            # 5️⃣ exact_text search highlighting (precise) - fallback if bboxes not applied
+            if exact_text and not highlight_applied:
+                import re
+                # Clean up leading/trailing quotes, smart quotes, and whitespace
+                clean_text = exact_text.strip().strip('"\'“”‘’')
+                clean_text = re.sub(r'\s+', ' ', clean_text)
+                if clean_text:
+                    matches = page_obj.search_for(clean_text)
+                    
+                    # Fallback 1: if clean_text is long, try the first 80 characters
+                    if not matches and len(clean_text) > 100:
+                        matches = page_obj.search_for(clean_text[:80])
+                    
+                    # Fallback 2: try the first 50 characters
+                    if not matches and len(clean_text) > 50:
+                        matches = page_obj.search_for(clean_text[:50])
+                        
+                    # Fallback 3: try the last 50 characters
+                    if not matches and len(clean_text) > 50:
+                        matches = page_obj.search_for(clean_text[-50:])
+                    
+                    if matches:
+                        for rect in matches:
+                            annot = page_obj.add_highlight_annot(rect)
+                            annot.set_colors(stroke=[1, 1, 0])
+                            annot.update()
+                        highlight_applied = True
 
             # 6️⃣ Serialize and cache
             pdf_bytes = doc_pdf.tobytes(garbage=3, clean=True, deflate=True)
