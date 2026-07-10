@@ -227,15 +227,19 @@ async def get_highlighted_pdf(
 
     try:
         if settings.use_grpc_rag:
-            # Use gRPC service
-            from app.clients.rag_client import get_rag_client
+            try:
+                # Use gRPC service
+                from app.clients.rag_client import get_rag_client
 
-            client = get_rag_client()
-            content = await client.get_highlighted_pdf(
-                document_url=doc,
-                page=page,
-                bboxes=parsed_bboxes or [],
-            )
+                client = get_rag_client()
+                content = await client.get_highlighted_pdf(
+                    document_url=doc,
+                    page=page,
+                    bboxes=parsed_bboxes or [],
+                )
+            except Exception as grpc_err:
+                logger.warning(f"gRPC highlighted PDF failed: {grpc_err}. Falling back to local PDF highlight service.")
+                content = await pdf_service.get_highlighted_pdf(doc, page, parsed_bboxes, exact_text)
         else:
             # Use local service
             content = await pdf_service.get_highlighted_pdf(doc, page, parsed_bboxes, exact_text)
