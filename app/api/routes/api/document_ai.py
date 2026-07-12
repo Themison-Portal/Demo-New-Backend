@@ -255,22 +255,47 @@ async def chat(
         
         if not successes and documents:
             logger.warning("RAG query failed or returned no results. Returning mock answer for local testing.")
-            primary_doc = documents[0]
+            mock_sources = []
+            response_parts = []
+            
+            # Generate up to 10 mock citations across up to 3 documents on pages 3 to 10
+            for idx, doc in enumerate(documents[:3]):
+                pages = [3, 5, 8, 10] if idx == 0 else ([4, 7, 9] if idx == 1 else [6, 8, 10])
+                doc_pages_cited = []
+                for p in pages:
+                    if len(mock_sources) >= 10:
+                        break
+                    
+                    exact_texts = {
+                        3: "efficacy",
+                        4: "safety",
+                        5: "objectives",
+                        6: "protocol",
+                        7: "treatment",
+                        8: "clinical",
+                        9: "study",
+                        10: "patients"
+                    }
+                    text_to_highlight = exact_texts.get(p, "protocol")
+                    
+                    mock_sources.append({
+                        "name": doc.document_name,
+                        "section": f"Section {idx+1}.{p}",
+                        "page": p,
+                        "exactText": text_to_highlight,
+                        "relevance": "high",
+                        "bboxes": []
+                    })
+                    doc_pages_cited.append(str(p))
+                
+                response_parts.append(f"In {doc.document_name}, relevant objectives and safety findings are discussed on pages {', '.join(doc_pages_cited)}.")
+
             successes = [(
-                primary_doc,
+                documents[0],
                 {
                     "result": {
-                        "response": f"Based on {primary_doc.document_name}, the primary objective is to evaluate the efficacy and safety of the investigational product in the target population.",
-                        "sources": [
-                            {
-                                "name": primary_doc.document_name,
-                                "section": "1.0 Objectives",
-                                "page": 1,
-                                "exactText": "primary objective is to evaluate the efficacy",
-                                "relevance": "high",
-                                "bboxes": [[100.0, 500.0, 450.0, 520.0]]
-                            }
-                        ]
+                        "response": " ".join(response_parts) + "\n\nThis is a mock multi-document RAG response for local testing.",
+                        "sources": mock_sources
                     }
                 }
             )]
