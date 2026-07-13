@@ -9,6 +9,18 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+
+class Auth0UserCreationError(Exception):
+    """Raised when Auth0's Management API rejects a user creation. Carries the
+    human-readable reason (e.g. "PasswordStrengthError: Password is too weak")
+    and the upstream status code so the API layer can surface it to the client
+    instead of a bare 400/500."""
+
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class Auth0ManagementClient:
     def __init__(self):
         try:
@@ -78,7 +90,21 @@ class Auth0ManagementClient:
                 # User already exists, fetch it
                 logger.warning(f"User {email} already exists in Auth0, retrieving record.")
                 return await self.get_user_by_email(email)
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                # Surface Auth0's actual reason (e.g. a weak-password error)
+                # rather than a bare status code, so the client can show it.
+                try:
+                    body = resp.json()
+                    detail = (
+                        body.get("message")
+                        or body.get("error_description")
+                        or body.get("error")
+                        or resp.text
+                    )
+                except Exception:
+                    detail = resp.text or f"Auth0 returned {resp.status_code}"
+                logger.warning(f"Auth0 create_user rejected for {email}: {detail}")
+                raise Auth0UserCreationError(detail, status_code=resp.status_code)
             return resp.json()
 
     async def get_user_by_email(self, email: str) -> Dict[str, Any]:

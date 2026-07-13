@@ -13,7 +13,7 @@ from app.models.members import Member
 from app.models.profiles import Profile
 from app.models.invitations import Invitation
 from app.contracts.auth import SignupCompleteRequest, SignupCompleteResponse
-from app.core.auth0_management import auth0_mgmt
+from app.core.auth0_management import auth0_mgmt, Auth0UserCreationError
 import uuid
 from datetime import datetime
 
@@ -131,6 +131,11 @@ async def signup_complete(
             email=invitation.email, password=payload.password, name=display_name
         )
         auth0_sub = auth0_user["user_id"]
+    except Auth0UserCreationError as e:
+        # Auth0 rejected the request for a reason the user can act on
+        # (e.g. "Password is too weak") — surface it verbatim as a 400.
+        logger.warning(f"Auth0 rejected signup for {invitation.email}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to create Auth0 user: {e}")
         raise HTTPException(
