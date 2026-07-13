@@ -160,7 +160,14 @@ async def get_current_member(
             db.add(admin)
             await db.flush()
 
-        org_result = await db.execute(select(Organization).limit(1))
+        # Deterministic default: the OLDEST org, not an arbitrary `LIMIT 1`
+        # row. A user reaching JIT has no invitation, so there's no "correct"
+        # org to infer — picking a stable one avoids the same email landing in
+        # different orgs across runs. Prefer invitations (which set the org
+        # explicitly) over self-provisioning.
+        org_result = await db.execute(
+            select(Organization).order_by(Organization.created_at.asc()).limit(1)
+        )
         org = org_result.scalars().first()
 
         if not org:
@@ -173,6 +180,14 @@ async def get_current_member(
             )
             db.add(org)
             await db.flush()
+        else:
+            logger.warning(
+                "JIT: no invitation for %s — auto-assigning to oldest existing org "
+                "'%s' (%s). Send an invitation to place users in a specific org.",
+                email,
+                org.name,
+                org.id,
+            )
 
         member = Member(
             id=uuid.uuid4(),

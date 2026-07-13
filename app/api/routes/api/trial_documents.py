@@ -164,10 +164,10 @@ async def upload_trial_document(
     db: AsyncSession = Depends(get_db),
     storage: StorageService = Depends(get_storage_service),
 ):
-    crud_trial = CRUDBase(Trial, db)
-    trial = await crud_trial.get(trial_id)
-    if not trial:
-        raise HTTPException(status_code=404, detail="Trial not found")
+    # Enforce org-isolation / trial membership on WRITE, mirroring the read
+    # endpoints. Without this, any authenticated member could upload documents
+    # into any trial across organizations (cross-org write hole).
+    trial = await get_trial_with_access(trial_id, member, db)
 
     settings = get_settings()
     bucket = settings.gcs_bucket_trial_documents

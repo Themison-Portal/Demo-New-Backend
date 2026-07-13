@@ -84,12 +84,18 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       UPLOAD_API_KEY: ${UPLOAD_API_KEY}
-      # Auth0
+      # Auth0 (AUTH0_CLIENT_ID/SECRET are the Management-API M2M app creds,
+      # used to create invited users on /auth/signup/complete)
       AUTH0_DOMAIN: ${AUTH0_DOMAIN}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
       AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
       AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
       AUTH_DISABLED: ${AUTH_DISABLED:-false}
+      # Email (SendGrid) — invitation emails. EMAIL_FROM must be a
+      # SendGrid-verified sender or delivery is rejected.
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-noreply@themison.com}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Themison Portal}
       # RAG service — talks to the sibling rag-service container by Docker DNS.
       # Default transport is HTTP on :8000. Set USE_GRPC_RAG=true and adjust the
       # address to `rag-service:50051` to use the gRPC fallback.
@@ -148,6 +154,11 @@ services:
       # BE reached by Docker DNS (sibling service in this compose).
       NEXT_PUBLIC_API_URL: http://backend:8080
       CORE_BACKEND_API_URL: http://backend:8080
+      # callBackend() (trials/patients/tasks + /api/wizard, /api/document-ai,
+      # /api/collaboration/ai) reads FASTAPI_BACKEND_URL, which defaults to
+      # localhost:8080 in code — inside the container that's the FE itself, so
+      # it must point at the backend service explicitly.
+      FASTAPI_BACKEND_URL: http://backend:8080
       CORE_BACKEND_API_KEY: ${UPLOAD_API_KEY}
       AUTH_DISABLED: ${AUTH_DISABLED:-false}
       PUBLIC_BASE_URL: ${FE_PUBLIC_BASE_URL:-http://localhost:3002}
@@ -155,7 +166,11 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      # Use 127.0.0.1, not localhost: inside the container `localhost` can
+      # resolve to IPv6 ::1 first, but the Node server binds IPv4 0.0.0.0 only,
+      # so a localhost check gets connection-refused and falsely reports
+      # unhealthy even though the app is serving fine.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 30s
       timeout: 5s
       retries: 3
