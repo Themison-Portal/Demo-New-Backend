@@ -146,6 +146,7 @@ async def get_current_member(
         logger.info("JIT: Creating new membership for %s", email)
         from app.models.organizations import Organization
         from app.models.themison_admins import ThemisonAdmin
+        from app.models.invitations import Invitation
 
         admin_result = await db.execute(select(ThemisonAdmin).limit(1))
         admin = admin_result.scalars().first()
@@ -160,34 +161,75 @@ async def get_current_member(
             db.add(admin)
             await db.flush()
 
-        # Deterministic default: the OLDEST org, not an arbitrary `LIMIT 1`
-        # row. A user reaching JIT has no invitation, so there's no "correct"
-        # org to infer — picking a stable one avoids the same email landing in
-        # different orgs across runs. Prefer invitations (which set the org
-        # explicitly) over self-provisioning.
-        org_result = await db.execute(
-            select(Organization).order_by(Organization.created_at.asc()).limit(1)
+        # Authoritative org for an invited user is the one named on their
+        # invitation — resolve it FIRST so JIT lands the member in the same org
+        # /signup/complete would, instead of an arbitrary default. This closes
+        # the cross-org bug where a user who authenticates before completing
+        # invitation signup was force-assigned to the oldest org.
+        invitation = (
+            (
+                await db.execute(
+                    select(Invitation)
+                    .where(Invitation.email == email)
+                    .where(Invitation.status.in_(("pending", "accepted")))
+                    .order_by(Invitation.invited_at.desc())
+                )
+            )
+            .scalars()
+            .first()
         )
-        org = org_result.scalars().first()
 
-        if not org:
-            logger.info("JIT: Creating default organization")
-            org = Organization(
-                id=uuid.uuid4(),
-                name="Themison Global",
-                created_by=admin.id,
-                onboarding_completed=True,
+        org = None
+        member_role = "admin"
+        if invitation:
+            org = (
+                (
+                    await db.execute(
+                        select(Organization).where(
+                            Organization.id == invitation.organization_id
+                        )
+                    )
+                )
+                .scalars()
+                .first()
             )
-            db.add(org)
-            await db.flush()
-        else:
-            logger.warning(
-                "JIT: no invitation for %s — auto-assigning to oldest existing org "
-                "'%s' (%s). Send an invitation to place users in a specific org.",
-                email,
-                org.name,
-                org.id,
+            if org:
+                member_role = invitation.initial_role
+                logger.info(
+                    "JIT: placing %s into invited org '%s' (%s) as %s",
+                    email,
+                    org.name,
+                    org.id,
+                    member_role,
+                )
+
+        # Fallback when there's no usable invitation: deterministic default of
+        # the OLDEST org (a stable choice so the same email doesn't land in
+        # different orgs across runs), creating one if none exist yet.
+        if org is None:
+            org_result = await db.execute(
+                select(Organization).order_by(Organization.created_at.asc()).limit(1)
             )
+            org = org_result.scalars().first()
+
+            if not org:
+                logger.info("JIT: Creating default organization")
+                org = Organization(
+                    id=uuid.uuid4(),
+                    name="Themison Global",
+                    created_by=admin.id,
+                    onboarding_completed=True,
+                )
+                db.add(org)
+                await db.flush()
+            else:
+                logger.warning(
+                    "JIT: no invitation for %s — auto-assigning to oldest existing org "
+                    "'%s' (%s). Send an invitation to place users in a specific org.",
+                    email,
+                    org.name,
+                    org.id,
+                )
 
         member = Member(
             id=uuid.uuid4(),
@@ -197,7 +239,7 @@ async def get_current_member(
             name=user.get("name")
             or f"{profile.first_name or ''} {profile.last_name or ''}".strip()
             or email,
-            default_role="admin",
+            default_role=member_role,
             is_active=True,
             onboarding_completed=True,
         )
