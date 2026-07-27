@@ -36,6 +36,7 @@ from app.contracts.document_ai import (
 from app.dependencies.auth import get_current_member
 from app.dependencies.db import get_db
 from app.dependencies.jobs import get_job_status_service
+from app.dependencies.trial_access import get_trial_with_access
 from app.models.documents import Document
 from app.models.members import Member
 from app.services.jobs.job_status_service import JobStatusService
@@ -271,6 +272,31 @@ async def _load_documents_by_ids(
     return list(result.scalars().all())
 
 
+async def _authorize_document_access(
+    documents: List[Document],
+    member: Member,
+    db: AsyncSession,
+) -> None:
+    """Enforce org-isolation (and per-trial membership for non-admins) on a set
+    of documents, mirroring the /api/trial-documents read endpoints.
+
+    A document is only reachable through its trial, so we defer to
+    `get_trial_with_access` on each document's `trial_id`. Fail-closed: a
+    document with no trial, one in another org, or one whose trial the caller
+    isn't an active member of raises 404/403 and aborts the whole request —
+    rather than silently leaking or dropping it. Without this, both endpoints
+    accepted any document UUID from any organization.
+    """
+    for doc in documents:
+        if doc.trial_id is None:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Document {doc.id} is not associated with a trial you can access",
+            )
+        # Raises 404 (missing trial / wrong org) or 403 (not a trial member).
+        await get_trial_with_access(doc.trial_id, member, db)
+
+
 def _build_chat_response(
     successes: List[Tuple[Document, dict]],
     documents_queried: int,
@@ -359,6 +385,10 @@ async def chat(
         raise HTTPException(status_code=400, detail="No user message in `messages`")
 
     documents = await _load_documents_by_ids(db, payload.document_ids)
+
+    # Org-isolation: only let the caller RAG-query documents whose trial they
+    # can access. No-op when nothing loaded (guidance path below handles it).
+    await _authorize_document_access(documents, member, db)
 
     # No selected documents -> return a guidance message rather than calling
     # a general LLM. The FE used to do an OpenAI fallback here; per the
@@ -537,6 +567,11 @@ async def retry_ingestion(
     ).scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # Org-isolation: only allow reingesting a document whose trial the caller
+    # can access, so a user can't trigger ingestion jobs on other orgs' docs.
+    await _authorize_document_access([doc], member, db)
+
     if not doc.document_url:
         raise HTTPException(status_code=400, detail="Document has no stored URL to reingest from")
 
