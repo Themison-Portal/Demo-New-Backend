@@ -149,7 +149,21 @@ async def signup_complete(
     )
 
     if existing_member:
-        # Member already exists — just mark invitation as accepted
+        # Member already exists (e.g. was JIT-provisioned via direct Auth0
+    # login before completing this invite). Reconcile them into the
+    # org/role this invitation specifies — a member always belongs to
+    # exactly one org, so accepting a new invite always moves them.
+        if existing_member.organization_id != invitation.organization_id:
+            logger.warning(
+            "Reassigning existing member %s from org %s to invited org %s",
+            existing_member.email,
+            existing_member.organization_id,
+            invitation.organization_id,
+        )
+        existing_member.organization_id = invitation.organization_id
+
+        existing_member.default_role = invitation.initial_role
+        existing_member.is_active = True
         invitation.status = "accepted"
         invitation.accepted_at = datetime.now(timezone.utc)
         await db.commit()
