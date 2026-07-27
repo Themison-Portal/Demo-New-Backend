@@ -60,6 +60,7 @@ class RagHttpClient:
         self,
         document_url: str,
         document_id: UUID,
+        organization_id: UUID,
         chunk_size: int = 750,
     ) -> AsyncIterator[Dict]:
         """Stream ingestion progress events from the HTTP SSE endpoint."""
@@ -67,6 +68,7 @@ class RagHttpClient:
         body = {
             "document_url": document_url,
             "document_id": str(document_id),
+            "organization_id": str(organization_id),
             "chunk_size": chunk_size,
         }
         try:
@@ -142,6 +144,7 @@ class RagHttpClient:
         query: str,
         document_id: UUID,
         document_name: str,
+        organization_id: UUID,
         top_k: int = 20,
         min_score: float = 0.04,
     ) -> Dict:
@@ -150,6 +153,7 @@ class RagHttpClient:
             "query": query,
             "document_id": str(document_id),
             "document_name": document_name,
+            "organization_id": str(organization_id),
             "top_k": top_k,
             "min_score": min_score,
         }
@@ -193,12 +197,12 @@ class RagHttpClient:
             )
         return resp.content
 
-    async def invalidate_document(self, document_id: UUID) -> Dict:
+    async def invalidate_document(self, document_id: UUID,organization_id: UUID) -> Dict:
         client = await self._ensure_client()
         try:
             resp = await client.post(
                 "/v1/invalidate_document",
-                json={"document_id": str(document_id)},
+                json={"document_id": str(document_id),"organization_id": str(organization_id)},
                 timeout=self.timeout,
             )
         except httpx.HTTPError as e:
