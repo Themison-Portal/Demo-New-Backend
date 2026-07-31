@@ -17,8 +17,9 @@ import asyncio
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import AsyncIterator, List, Optional, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4, uuid5
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -37,12 +38,19 @@ from app.dependencies.auth import get_current_member
 from app.dependencies.db import get_db
 from app.dependencies.jobs import get_job_status_service
 from app.dependencies.trial_access import get_trial_with_access
+from app.models.chat_messages import ChatMessage as ChatMessageRow
+from app.models.chat_sessions import ChatSession
 from app.models.documents import Document
 from app.models.members import Member
 from app.services.jobs.job_status_service import JobStatusService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Fixed namespace for folding a client-supplied conversation id (which may be an
+# arbitrary stable string like the FE's "chat-..." id, not a UUID) into a
+# deterministic chat_sessions.id. Same input string → same UUID → same row.
+_CHAT_SESSION_NS = UUID("2b6d3f9e-8c4a-4b1d-9e7f-1a2b3c4d5e6f")
 
 
 def _get_real_sentence_from_page(doc_pdf, page_num: int, question: str) -> str:
@@ -297,6 +305,110 @@ async def _authorize_document_access(
         await get_trial_with_access(doc.trial_id, member, db)
 
 
+async def _persist_chat_turn(
+    db: AsyncSession,
+    member: Member,
+    payload: ChatRequest,
+    question: str,
+    documents: List[Document],
+    response: ChatResponse,
+) -> None:
+    """Best-effort persistence of one chat turn (the user's question + the
+    assistant's answer) into `chat_sessions` / `chat_messages`, so document-AI
+    conversations are retained and resumable.
+
+    Resolves the session from `payload.session_id` (scoped to the caller) or
+    creates a new one, then appends exactly this turn — not the whole message
+    history the FE re-sends each call, which would duplicate. On success it sets
+    `response.session_id` so the FE can continue the conversation.
+
+    Never raises: the chat answer must reach the user even if persistence fails,
+    so any error is logged and swallowed (with a rollback) rather than
+    propagated. Previously this endpoint stored nothing at all.
+    """
+    try:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Map the caller's session_id to a deterministic chat_sessions.id so
+        # repeated turns in one conversation resolve to the same row. The FE
+        # sends its per-conversation id, which may be a UUID or an arbitrary
+        # stable string ("chat-..."): a real UUID is used as-is; anything else is
+        # folded into a stable UUIDv5. Honouring the caller's id on create (vs a
+        # fresh uuid4) is what makes append work — the FE reuses its id across
+        # turns but never reads back the one we return.
+        canonical_sid: Optional[UUID] = None
+        if payload.session_id:
+            raw = str(payload.session_id).strip()
+            if raw:
+                try:
+                    canonical_sid = UUID(raw)
+                except (ValueError, TypeError):
+                    canonical_sid = uuid5(_CHAT_SESSION_NS, raw)
+
+        session: Optional[ChatSession] = None
+        if canonical_sid is not None:
+            session = (
+                (
+                    await db.execute(
+                        select(ChatSession).where(
+                            ChatSession.id == canonical_sid,
+                            # Scope to the caller so one user can't append to
+                            # another user's session by guessing its id.
+                            ChatSession.user_id == member.profile_id,
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+
+        if session is None:
+            trial_uuid = None
+            if payload.trial_id:
+                try:
+                    trial_uuid = UUID(str(payload.trial_id))
+                except (ValueError, TypeError):
+                    trial_uuid = None
+            first_doc = documents[0] if documents else None
+            session = ChatSession(
+                id=canonical_sid or uuid4(),
+                user_id=member.profile_id,
+                title=(question[:60].strip() or "AI chat"),
+                trial_id=trial_uuid or (first_doc.trial_id if first_doc else None),
+                document_id=first_doc.id if first_doc else None,
+                document_name=first_doc.document_name if first_doc else None,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(session)
+            await db.flush()  # assign session.id
+
+        db.add(
+            ChatMessageRow(
+                session_id=session.id,
+                role="user",
+                content=question,
+                created_at=now,
+            )
+        )
+        source_ids = [s.file_id for s in response.sources if s.file_id] or None
+        db.add(
+            ChatMessageRow(
+                session_id=session.id,
+                role="assistant",
+                content=response.message,
+                document_chunk_ids=source_ids,
+                created_at=now,
+            )
+        )
+        session.updated_at = now
+        await db.commit()
+        response.session_id = str(session.id)
+    except Exception as e:  # never let persistence break the chat response
+        await db.rollback()
+        logger.warning("document-ai.chat: failed to persist chat turn: %s", e)
+
+
 def _build_chat_response(
     successes: List[Tuple[Document, dict]],
     documents_queried: int,
@@ -351,6 +463,7 @@ async def _sse_iter(payload: ChatResponse, chunk_size: int = 40, delay_s: float 
         "documentsWithSources": payload.documents_with_sources,
         "route": payload.route,
         "model": payload.model,
+        "sessionId": payload.session_id,
     })
 
     # Sources first so the UI can show citations as soon as they're available.
@@ -533,6 +646,11 @@ async def chat(
                 "Try rephrasing or expanding the selection."
             ),
         )
+
+    # Persist this turn (user question + assistant answer) before responding, so
+    # it's captured for both the JSON and SSE paths and `response.session_id` is
+    # populated for the FE. Best-effort — see `_persist_chat_turn`.
+    await _persist_chat_turn(db, member, payload, question, documents, response)
 
     accept = (request.headers.get("accept") or "").lower()
     if "text/event-stream" in accept:
