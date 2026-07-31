@@ -61,6 +61,9 @@ class ChatResponse(_CamelModel):
     model: Optional[str] = None
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
+    # The chat_sessions.id this turn was persisted under. The FE should send it
+    # back as `session_id` on the next request to continue the same conversation.
+    session_id: Optional[str] = None
 
 
 # ─────────────────────────────────────────
