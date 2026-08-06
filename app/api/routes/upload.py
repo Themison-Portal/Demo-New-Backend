@@ -23,6 +23,7 @@ class UploadDocumentRequest(BaseModel):
     """Upload document request."""
     document_url: str
     document_id: UUID
+    organization_id: UUID
     chunk_size: Optional[int] = 750
 
 
@@ -54,6 +55,7 @@ async def _run_ingestion_task(
     job_id: str,
     document_url: str,
     document_id: UUID,
+    organization_id: UUID,
     chunk_size: int,
     redis_client,
     use_grpc: bool,
@@ -107,6 +109,7 @@ async def _run_ingestion_task(
                 job_id=job_id,
                 document_url=document_url,
                 document_id=document_id,
+                organization_id=organization_id,
                 chunk_size=chunk_size,
                 job_service=job_service,
                 grpc_address=grpc_address,
@@ -117,33 +120,24 @@ async def _run_ingestion_task(
                 job_id=job_id,
                 document_url=document_url,
                 document_id=document_id,
+                organization_id=organization_id,
                 chunk_size=chunk_size,
                 job_service=job_service,
                 redis_client=redis_client,
             )
 
     except Exception as e:
-        logger.warning(f"Ingestion task failed for job {job_id}: {e}. Bypassing and marking as ready for local testing.")
-        try:
-            # Mark job complete for local testing
-            await job_service.update_progress(
-                job_id=job_id,
-                stage="complete",
-                progress_percent=100,
-                message="Ingestion complete (Mocked)",
-            )
-            await job_service.complete_job(job_id, {"success": True, "document_id": str(document_id)})
-            await _set_ingestion_status(document_id, "ready")
-        except Exception as inner_e:
-            logger.exception(f"Failed mock completion: {inner_e}")
-            await job_service.fail_job(job_id, str(e))
-            await _set_ingestion_status(document_id, "failed")
+        logger.error(f"Ingestion task failed for job {job_id}: {e}")
+        await job_service.fail_job(job_id, str(e))
+        await _set_ingestion_status(document_id, "failed")
+        
 
 
 async def _ingest_via_grpc(
     job_id: str,
     document_url: str,
     document_id: UUID,
+    organization_id: UUID,
     chunk_size: int,
     job_service: JobStatusService,
     grpc_address: str,
@@ -170,6 +164,7 @@ async def _ingest_via_grpc(
     async for progress in client.ingest_pdf(
         document_url=document_url,
         document_id=document_id,
+        organization_id=organization_id,
         chunk_size=chunk_size,
     ):
         if not status_set:
@@ -208,6 +203,7 @@ async def _ingest_via_local(
     job_id: str,
     document_url: str,
     document_id: UUID,
+    organization_id: UUID,
     chunk_size: int,
     job_service: JobStatusService,
     redis_client,
@@ -320,6 +316,7 @@ async def _ingest_via_local(
         # Store chunks
         await rag_service._insert_docling_chunks(
             document_id=document_id,
+            organization_id=organization_id,
             document_url=document_url,
             chunks=docs,
             embeddings=chunk_embeddings,
@@ -378,6 +375,7 @@ async def upload_pdf_document(
         job_id=job_id,
         document_url=body.document_url,
         document_id=body.document_id,
+        organization_id=body.organization_id,
         chunk_size=body.chunk_size or 750,
         redis_client=redis_client,
         use_grpc=settings.use_grpc_rag,
