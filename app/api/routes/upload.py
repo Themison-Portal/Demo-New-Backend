@@ -23,7 +23,7 @@ class UploadDocumentRequest(BaseModel):
     """Upload document request."""
     document_url: str
     document_id: UUID
-    organization_id: UUID
+    organization_id: Optional[UUID] = None
     chunk_size: Optional[int] = 750
 
 
@@ -345,37 +345,58 @@ async def upload_pdf_document(
     job_service: JobStatusService = Depends(get_job_status_service),
     x_api_key: str = Header(...),
 ):
-    """
-    Upload a PDF document for processing.
-
-    Returns immediately with a job ID. Use GET /upload/status/{job_id} to poll for progress.
-    """
     settings = get_settings()
 
-    # Validate API key
     if not settings.upload_api_key or x_api_key != settings.upload_api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Validate file type (handle URLs with query params like ?token=abc)
     from urllib.parse import urlparse
     url_path = urlparse(body.document_url).path.lower()
     if not url_path.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-    # Create job
+    # organization_id isn't always supplied by callers (e.g. the FE upload
+    # flow) - the document already exists with a trial_id by this point,
+    # so derive org from Document -> Trial rather than requiring every
+    # caller to know/send it.
+    organization_id = body.organization_id
+    if organization_id is None:
+        from sqlalchemy import select
+        from app.models.documents import Document
+        from app.models.trials import Trial
+        from app.db.session import async_session
+
+        async with async_session() as db:
+            doc = (
+                await db.execute(select(Document).where(Document.id == body.document_id))
+            ).scalar_one_or_none()
+            if doc is None or doc.trial_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="organization_id not provided and could not be derived "
+                           "from document (missing document or trial_id)",
+                )
+            trial = (
+                await db.execute(select(Trial).where(Trial.id == doc.trial_id))
+            ).scalar_one_or_none()
+            if trial is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Trial {doc.trial_id} not found for document {body.document_id}",
+                )
+            organization_id = trial.organization_id
+
     job_id = await job_service.create_job(body.document_id)
     await _set_ingestion_status(body.document_id, "queued")
 
-    # Get redis client for background task
     redis_client = request.app.state.redis_client
 
-    # Queue background task
     background_tasks.add_task(
         _run_ingestion_task,
         job_id=job_id,
         document_url=body.document_url,
         document_id=body.document_id,
-        organization_id=body.organization_id,
+        organization_id=organization_id,
         chunk_size=body.chunk_size or 750,
         redis_client=redis_client,
         use_grpc=settings.use_grpc_rag,
