@@ -106,6 +106,7 @@ async def _fan_out_query(
     documents: List[Document],
     question: str,
     organization_id: UUID,
+    conversation_history: List[dict],
 ) -> Tuple[List[Tuple[Document, dict]], List[Tuple[Document, Exception]]]:
     """Call RAG /query for each document in parallel. Returns (successes, failures)."""
     rag = get_rag_client()
@@ -117,9 +118,10 @@ async def _fan_out_query(
                 document_id=doc.id,
                 document_name=doc.document_name or "",
                 organization_id=organization_id,
+                conversation_history=conversation_history,
             )
             return doc, result, None
-        except Exception as e:  # noqa: BLE001 — keep partial results
+        except Exception as e:
             logger.warning("RAG query failed for document %s: %s", doc.id, e)
             return doc, None, e
 
@@ -127,7 +129,6 @@ async def _fan_out_query(
     successes = [(doc, result) for doc, result, err in results if err is None and result]
     failures = [(doc, err) for doc, _, err in results if err is not None]
     return successes, failures
-
 
 # ─────────────────────────────────────────
 # Endpoint: POST /chat
@@ -151,6 +152,58 @@ async def _load_documents_by_ids(
         select(Document).where(Document.id.in_(document_ids))
     )
     return list(result.scalars().all())
+
+async def _resolve_session_id(
+    db: AsyncSession,
+    member: Member,
+    session_id: Optional[str],
+) -> Optional[UUID]:
+    """Resolve the caller's session_id (real UUID, arbitrary stable string,
+    or None) to an existing chat_sessions.id, or None if no session exists
+    yet. Does not create a row - _persist_chat_turn still owns creation."""
+    if not session_id:
+        return None
+    raw = str(session_id).strip()
+    if not raw:
+        return None
+    try:
+        canonical_sid = UUID(raw)
+    except (ValueError, TypeError):
+        canonical_sid = uuid5(_CHAT_SESSION_NS, raw)
+
+    existing = (
+        await db.execute(
+            select(ChatSession).where(
+                ChatSession.id == canonical_sid,
+                ChatSession.user_id == member.profile_id,
+            )
+        )
+    ).scalars().first()
+    return existing.id if existing else None
+
+
+async def _get_recent_history(
+    db: AsyncSession,
+    session_id: Optional[UUID],
+    max_turns: int = 5,
+) -> List[dict]:
+    """
+    Fetch the last N turns for a session, oldest-first, for passing to
+    rag-service as conversation_history. Returns [] when there's no
+    session yet (first message in a new conversation) - condensation is
+    a no-op in that case, matching "standalone questions are unaffected."
+    """
+    if session_id is None:
+        return []
+
+    result = await db.execute(
+        select(ChatMessageRow)
+        .where(ChatMessageRow.session_id == session_id)
+        .order_by(ChatMessageRow.created_at.desc())
+        .limit(max_turns * 2)  # *2 since each turn is a user+assistant pair
+    )
+    rows = list(reversed(result.scalars().all()))
+    return [{"role": r.role, "content": r.content} for r in rows]
 
 
 async def _authorize_document_access(
@@ -391,7 +444,11 @@ async def chat(
             documents_with_sources=0,
         )
     else:
-        successes, failures = await _fan_out_query(documents, question,member.organization_id)
+        canonical_sid = await _resolve_session_id(db, member, payload.session_id)
+        conversation_history = await _get_recent_history(db, canonical_sid)
+        successes, failures = await _fan_out_query(
+            documents, question, member.organization_id, conversation_history
+        )
         if failures:
             logger.info(
                 "document-ai.chat: %d/%d document queries failed (continuing with successes)",
@@ -471,6 +528,7 @@ async def retry_ingestion(
         job_id=job_id,
         document_url=doc.document_url,
         document_id=document_id,
+        organization_id=member.organization_id,
         chunk_size=750,
         redis_client=redis_client,
         use_grpc=settings.use_grpc_rag,

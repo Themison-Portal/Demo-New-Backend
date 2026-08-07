@@ -147,6 +147,7 @@ class RagHttpClient:
         organization_id: UUID,
         top_k: int = 20,
         min_score: float = 0.04,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict:
         client = await self._ensure_client()
         body = {
@@ -156,6 +157,7 @@ class RagHttpClient:
             "organization_id": str(organization_id),
             "top_k": top_k,
             "min_score": min_score,
+            "conversation_history": conversation_history or [],
         }
         try:
             resp = await client.post("/v1/query", json=body, timeout=self.timeout)
