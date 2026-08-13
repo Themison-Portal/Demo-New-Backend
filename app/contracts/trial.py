@@ -9,7 +9,30 @@ from uuid import UUID
 from .base import BaseContract, TimestampedContract
 
 
-class TrialBase(BaseContract):
+class _TrialFeFields(BaseContract):
+    """FE-owned trial fields migrated from the FE MySQL `trials` table."""
+    slug: Optional[str] = None
+    demo_mode: Optional[str] = None
+    protocol_number: Optional[str] = None
+    investigational_product: Optional[str] = None
+    indication: Optional[str] = None
+    nct_number: Optional[str] = None
+    current_version: Optional[str] = None
+    amendment_version: Optional[str] = None
+    release_date: Optional[str] = None
+    sample_size: Optional[str] = None
+    number_of_sites: Optional[str] = None
+    study_duration: Optional[str] = None
+    study_design_type: Optional[str] = None
+    primary_objective: Optional[str] = None
+    primary_endpoint: Optional[str] = None
+    principal_investigator: Optional[str] = None
+    enrolled_patients: Optional[int] = None
+    target_patients: Optional[int] = None
+    completion_percentage: Optional[int] = None
+
+
+class TrialBase(_TrialFeFields):
     name: str
     phase: str
     location: str
@@ -26,7 +49,7 @@ class TrialCreate(TrialBase):
     pass
 
 
-class TrialUpdate(BaseContract):
+class TrialUpdate(_TrialFeFields):
     name: Optional[str] = None
     description: Optional[str] = None
     phase: Optional[str] = None

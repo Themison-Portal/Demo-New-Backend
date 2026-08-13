@@ -55,7 +55,21 @@ class Document(Base):
     description: Mapped[Optional[str]] = Column(Text, nullable=True)
     tags: Mapped[Optional[List[str]]] = Column(ARRAY(Text), nullable=True)
     warning: Mapped[Optional[bool]] = Column(Boolean, nullable=True)
-    
+
+    # FE-only document fields migrated from the (retired) FE `protocols` table.
+    # `category` is free-text (e.g. "Protocol", "Amendments", "ICF") and is
+    # intentionally separate from the `document_type` enum — the FE drives the
+    # Documents-hub tabs/filtering off it. `is_current`/`archived_at` drive the
+    # FE "Current" badge and Active/Archived tabs respectively.
+    category: Mapped[Optional[str]] = Column(String(100), nullable=True)
+    document_version: Mapped[Optional[str]] = Column(String(50), nullable=True)
+    amendment_version: Mapped[Optional[str]] = Column(String(50), nullable=True)
+    release_date: Mapped[Optional[str]] = Column(String(50), nullable=True)
+    is_current: Mapped[Optional[bool]] = Column(Boolean, nullable=True, default=False)
+    archived_at: Mapped[Optional[datetime]] = Column(DateTime(timezone=True), nullable=True)
+    source_type: Mapped[Optional[str]] = Column(String(32), nullable=True)
+    source_reference: Mapped[Optional[str]] = Column(String(255), nullable=True)
+
     # Relationships
     chat_sessions: Mapped[List["ChatSession"]] = relationship("ChatSession", secondary="chat_document_links", back_populates="documents")
     docling_chunks: Mapped[List["DocumentChunkDocling"]] = relationship("DocumentChunkDocling", back_populates="document")

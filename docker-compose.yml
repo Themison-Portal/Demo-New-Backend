@@ -33,6 +33,39 @@ services:
       timeout: 5s
       retries: 5
 
+  # RAG service — separate image built from ../rag-service.
+  # Defaults to HTTP on 8000; set TRANSPORT=grpc to fall back.
+  # Shares the new-platform Postgres (themison_new) with the BE so the
+  # chunks table is the same one /query reads from.
+  rag-service:
+    build:
+      context: ../rag-service
+      dockerfile: Dockerfile
+    container_name: themison-new-rag-service
+    restart: unless-stopped
+    ports:
+      - "8001:8000" # host:container — 8001 on host to avoid clashing with other locally-running HTTP services
+    environment:
+      TRANSPORT: ${RAG_TRANSPORT:-http}
+      HTTP_PORT: 8000
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/themison_new
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GRPC_PORT: 50051
+      GRPC_MAX_WORKERS: 10
+      HYBRID_SEARCH_ENABLED: "true"
+      SEMANTIC_CACHE_SIMILARITY_THRESHOLD: "0.90"
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   # FastAPI Backend
   backend:
     build:
@@ -51,17 +84,27 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       UPLOAD_API_KEY: ${UPLOAD_API_KEY}
-      # Auth0
+      # Auth0 (AUTH0_CLIENT_ID/SECRET are the Management-API M2M app creds,
+      # used to create invited users on /auth/signup/complete)
       AUTH0_DOMAIN: ${AUTH0_DOMAIN}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
       AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
       AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
       AUTH_DISABLED: ${AUTH_DISABLED:-false}
-      # RAG service — points to OLD existing RAG service, no new RAG needed
-      RAG_SERVICE_ADDRESS: ${RAG_SERVICE_ADDRESS:-localhost:50051}
+      # Email (SendGrid) — invitation emails. EMAIL_FROM must be a
+      # SendGrid-verified sender or delivery is rejected.
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-noreply@themison.com}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Themison Portal}
+      # RAG service — talks to the sibling rag-service container by Docker DNS.
+      # Default transport is HTTP on :8000. Set USE_GRPC_RAG=true and adjust the
+      # address to `rag-service:50051` to use the gRPC fallback.
+      RAG_SERVICE_ADDRESS: ${RAG_SERVICE_ADDRESS:-http://rag-service:8000}
       USE_GRPC_RAG: ${USE_GRPC_RAG:-false}
-      # Local file URL for the RAG service to fetch uploaded PDFs from
-      LOCAL_STORAGE_BASE_URL: ${LOCAL_STORAGE_BASE_URL:-http://localhost:8000}
+      # Local file URL for the RAG service to fetch uploaded PDFs from.
+      # rag-service container reaches the BE container via Docker DNS at
+      # http://backend:8080 — no host.docker.internal trickery needed.
+      LOCAL_STORAGE_BASE_URL: ${LOCAL_STORAGE_BASE_URL:-http://backend:8080}
       # CORS
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       ALLOW_ALL_ORIGINS: ${ALLOW_ALL_ORIGINS:-true}
@@ -72,11 +115,65 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rag-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 30s
+
+  # FE (Vite React client + Express tRPC server) — separate image built
+  # from the FE repo's production Dockerfile. Shares the docker-compose
+  # network with backend + rag-service so internal DNS works.
+  # FE MySQL stays where it is (themison-fe-mysql in the old core-backendv4
+  # compose) — reachable via host.docker.internal:3306 from inside this
+  # container.
+  frontend:
+    build:
+      context: ../NewFE/Demo-New-Frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_AUTH0_DOMAIN: ${VITE_AUTH0_DOMAIN:-}
+        VITE_AUTH0_CLIENT_ID: ${VITE_AUTH0_CLIENT_ID:-}
+        VITE_AUTH0_AUDIENCE: ${VITE_AUTH0_AUDIENCE:-}
+        VITE_AUTH0_REDIRECT_URI: ${VITE_AUTH0_REDIRECT_URI:-}
+        VITE_APP_ID: ${VITE_APP_ID:-}
+        VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL:-}
+    container_name: themison-new-frontend
+    restart: unless-stopped
+    ports:
+      - "3002:3000" # host:container — match the dev-server host port
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # FE MySQL is still in the old core-backendv4 compose project.
+      # Reach it via the host gateway.
+      DATABASE_URL: ${FE_DATABASE_URL:-mysql://themison:themison@host.docker.internal:3306/themison_fe}
+      # BE reached by Docker DNS (sibling service in this compose).
+      NEXT_PUBLIC_API_URL: http://backend:8080
+      CORE_BACKEND_API_URL: http://backend:8080
+      # callBackend() (trials/patients/tasks + /api/wizard, /api/document-ai,
+      # /api/collaboration/ai) reads FASTAPI_BACKEND_URL, which defaults to
+      # localhost:8080 in code — inside the container that's the FE itself, so
+      # it must point at the backend service explicitly.
+      FASTAPI_BACKEND_URL: http://backend:8080
+      CORE_BACKEND_API_KEY: ${UPLOAD_API_KEY}
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
+      PUBLIC_BASE_URL: ${FE_PUBLIC_BASE_URL:-http://localhost:3002}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # Use 127.0.0.1, not localhost: inside the container `localhost` can
+      # resolve to IPv6 ::1 first, but the Node server binds IPv4 0.0.0.0 only,
+      # so a localhost check gets connection-refused and falsely reports
+      # unhealthy even though the app is serving fine.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
       start_period: 30s
 
 volumes:

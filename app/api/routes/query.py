@@ -205,6 +205,7 @@ async def get_highlighted_pdf(
     doc: str,
     page: int,
     bboxes: str | None = Query(None, description="JSON string of list of lists: [[x0,y0,x1,y1],...]"),
+    exact_text: str | None = Query(None, description="Verbatim text to highlight on the page"),
     pdf_service: IPDFHightlightService = Depends(get_pdf_highlight_service),
 ):
     """
@@ -213,29 +214,35 @@ async def get_highlighted_pdf(
     Uses gRPC RAG Service if USE_GRPC_RAG=true, otherwise uses local service.
     """
     settings = get_settings()
-    logger.info(f"Generating highlighted PDF for doc: {doc}, page: {page}, bboxes: {bboxes}")
+    logger.info(f"Generating highlighted PDF for doc: {doc}, page: {page}, bboxes: {bboxes}, exact_text: {exact_text}")
 
-    try:
-        parsed_bboxes = json.loads(bboxes)
-        if not isinstance(parsed_bboxes, list):
-            raise ValueError("The bboxes parameter must be a JSON list.")
-    except Exception:
-        raise HTTPException(400, "Invalid bboxes format")
+    parsed_bboxes = None
+    if bboxes:
+        try:
+            parsed_bboxes = json.loads(bboxes)
+            if not isinstance(parsed_bboxes, list):
+                raise ValueError("The bboxes parameter must be a JSON list.")
+        except Exception:
+            raise HTTPException(400, "Invalid bboxes format")
 
     try:
         if settings.use_grpc_rag:
-            # Use gRPC service
-            from app.clients.rag_client import get_rag_client
+            try:
+                # Use gRPC service
+                from app.clients.rag_client import get_rag_client
 
-            client = get_rag_client()
-            content = await client.get_highlighted_pdf(
-                document_url=doc,
-                page=page,
-                bboxes=parsed_bboxes,
-            )
+                client = get_rag_client()
+                content = await client.get_highlighted_pdf(
+                    document_url=doc,
+                    page=page,
+                    bboxes=parsed_bboxes or [],
+                )
+            except Exception as grpc_err:
+                logger.warning(f"gRPC highlighted PDF failed: {grpc_err}. Falling back to local PDF highlight service.")
+                content = await pdf_service.get_highlighted_pdf(doc, page, parsed_bboxes, exact_text)
         else:
             # Use local service
-            content = await pdf_service.get_highlighted_pdf(doc, page, parsed_bboxes)
+            content = await pdf_service.get_highlighted_pdf(doc, page, parsed_bboxes, exact_text)
 
         return Response(content=content, media_type="application/pdf")
 

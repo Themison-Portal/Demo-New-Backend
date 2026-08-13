@@ -1,0 +1,194 @@
+═══════════════════════════════════════════════════════════════════════════════
+Themison — Render Environment Variables
+═══════════════════════════════════════════════════════════════════════════════
+
+Reference for the env vars to set in Render for each of the three services
+after the LLM-consolidation work (Phases 1-6).
+
+Replace every <placeholder> with a real value. Lines marked "[BUILD]" are
+inlined into the FE client bundle by Vite at BUILD time — changing them
+after a deploy requires a manual rebuild ("Clear build cache & deploy").
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. RAG SERVICE  (themison-rag-service)
+═══════════════════════════════════════════════════════════════════════════════
+# The ONLY service that holds LLM provider keys.
+# Builds from rag-service/Dockerfile.
+
+# ─── Required ────────────────────────────────────────────────────────────────
+OPENAI_API_KEY=sk-proj-<your real OpenAI key>
+ANTHROPIC_API_KEY=sk-ant-api03-<your real Anthropic key>
+DATABASE_URL=postgresql+asyncpg://<user>:<pass>@<cloud-postgres-host>:<port>/<dbname>
+# ↑ MUST be the same Postgres the BE uses — chunks must land where BE queries.
+
+# ─── Transport — HTTP is the default and only requires Render's $PORT ───────
+TRANSPORT=http
+# HTTP_PORT is auto-overridden by Render's $PORT injection — no value needed.
+
+# ─── gRPC fallback (only set if TRANSPORT=grpc) ─────────────────────────────
+# GRPC_PORT=50051
+
+# ─── Optional (code defaults are fine for most deployments) ──────────────────
+LLM_MODEL=claude-sonnet-4-6
+GRPC_MAX_WORKERS=10
+HYBRID_SEARCH_ENABLED=true
+SEMANTIC_CACHE_SIMILARITY_THRESHOLD=0.90
+EMBEDDING_MODEL=text-embedding-3-small
+EMBEDDING_DIMENSIONS=1536
+RETRIEVAL_TOP_K=20
+RETRIEVAL_MIN_SCORE=0.04
+
+# ─── Optional (enable only if you turn on Cohere reranking) ──────────────────
+# RERANKER_ENABLED=true
+# COHERE_API_KEY=<cohere key>
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. BACKEND  (themison-new-backend)
+═══════════════════════════════════════════════════════════════════════════════
+# Builds from Demo-New-Backend/Dockerfile.
+# Phase 6: no longer holds LLM keys. All LLM work delegated to RAG via gRPC.
+
+# ─── Data layer (required) ───────────────────────────────────────────────────
+DATABASE_URL=postgresql+asyncpg://<user>:<pass>@<cloud-postgres-host>:<port>/<dbname>
+# ↑ SAME value as RAG service's DATABASE_URL.
+REDIS_URL=redis://<cloud-redis-host>:<port>/0
+
+# ─── API key gate for /upload and /query (required) ──────────────────────────
+UPLOAD_API_KEY=<long random secret>
+# ↑ The FE's CORE_BACKEND_API_KEY must match this exact value.
+
+# ─── RAG wiring (required — fixes the wizard 502) ────────────────────────────
+# Default transport is HTTP — point at the RAG service's public Render URL.
+RAG_SERVICE_ADDRESS=https://<rag-render-hostname>.onrender.com
+USE_GRPC_RAG=false
+# Legacy gRPC fallback (only if RAG service is started with TRANSPORT=grpc):
+#   RAG_SERVICE_ADDRESS=<rag-render-hostname>.onrender.com:443
+#   USE_GRPC_RAG=true
+# (The BE's rag_client.py switches to TLS-secured gRPC when the address ends in :443.)
+
+# ─── Storage (required — RAG self-fetches PDFs from this URL) ────────────────
+LOCAL_STORAGE_BASE_URL=https://<be-render-hostname>.onrender.com
+# ↑ Use the BE's own public URL so the RAG container can fetch uploaded PDFs.
+#   OR set GCS_BUCKET_TRIAL_DOCUMENTS below and the BE will use GCS instead.
+
+# ─── Auth0 (required for production) ─────────────────────────────────────────
+AUTH0_DOMAIN=<your tenant>.auth0.com
+AUTH0_AUDIENCE=https://<your api identifier>
+AUTH0_CLIENT_ID=<auth0 client id>
+AUTH0_CLIENT_SECRET=<auth0 client secret>
+AUTH_DISABLED=false
+
+# ─── CORS (required) ─────────────────────────────────────────────────────────
+FRONTEND_URL=https://<fe-render-hostname>.onrender.com
+ALLOW_ALL_ORIGINS=false
+
+# ─── GCS (optional — set if using GCS instead of LOCAL_STORAGE_BASE_URL) ─────
+# GCS_PROJECT_ID=<gcp project id>
+# GCS_BUCKET_TRIAL_DOCUMENTS=<bucket name>
+# GCS_BUCKET_PATIENT_DOCUMENTS=<bucket name>
+# GCS_CREDENTIALS_PATH=/etc/secrets/gcs-key.json   ← use Render Secret File
+
+# ─── DO NOT set (Phase 6 removed BE's dependency on these) ───────────────────
+# OPENAI_API_KEY      ← BE doesn't use it anymore
+# ANTHROPIC_API_KEY   ← BE doesn't use it anymore
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. FRONTEND  (demo-new-frontend-patetints-tab)
+═══════════════════════════════════════════════════════════════════════════════
+# Builds from Demo-New-Frontend/Dockerfile.
+# VITE_* and AUTH0_* vars are inlined at BUILD time — set BEFORE first build.
+
+# ─── Runtime (set on the service's Environment tab) ──────────────────────────
+NODE_ENV=production
+# PORT — Render sets this automatically, don't override.
+
+# ─── BE wiring (runtime, required) ───────────────────────────────────────────
+NEXT_PUBLIC_API_URL=https://<be-render-hostname>.onrender.com
+# ↑ Used by the new callBackend() helper. Renamed from FASTAPI_BACKEND_URL.
+CORE_BACKEND_API_URL=https://<be-render-hostname>.onrender.com
+# ↑ Used by coreBackendClient.ts for document upload's multipart call.
+CORE_BACKEND_API_KEY=<same long random secret as BE's UPLOAD_API_KEY>
+
+# ─── FE database (required) ──────────────────────────────────────────────────
+DATABASE_URL=mysql://<user>:<pass>@<cloud-mysql-host>:<port>/themison_fe
+
+# ─── Public URL of the FE itself (runtime) ───────────────────────────────────
+PUBLIC_BASE_URL=https://<fe-render-hostname>.onrender.com
+
+# ─── Auth0 SPA (BUILD time — vite inlines into client bundle) ────────────────
+# [BUILD] VITE_AUTH0_DOMAIN=<your tenant>.auth0.com
+# [BUILD] VITE_AUTH0_CLIENT_ID=<auth0 SPA client id>
+# [BUILD] VITE_AUTH0_AUDIENCE=https://<your api identifier>
+# [BUILD] VITE_AUTH0_REDIRECT_URI=https://<fe-render-hostname>.onrender.com/callback
+VITE_AUTH0_DOMAIN=<your tenant>.auth0.com
+VITE_AUTH0_CLIENT_ID=<auth0 SPA client id>
+VITE_AUTH0_AUDIENCE=https://<your api identifier>
+VITE_AUTH0_REDIRECT_URI=https://<fe-render-hostname>.onrender.com/callback
+
+# ─── DO NOT set (Phase 6 removed the FE's dependency on these) ───────────────
+# AUTH_DISABLED          ← dev-only bypass, leave unset
+# OPENAI_API_KEY         ← FE has no openai SDK anymore
+# OPENAI_MODEL           ← unused
+# RAG_PROVIDER           ← unused
+# EXTERNAL_RAG_API_URL   ← unused
+# EXTERNAL_RAG_API_KEY   ← unused
+# BUILT_IN_FORGE_API_URL ← unused unless you actually use the Manus Forge storage proxy
+# BUILT_IN_FORGE_API_KEY ← unused
+# FASTAPI_BACKEND_URL    ← renamed to NEXT_PUBLIC_API_URL
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ CROSS-SERVICE CONSISTENCY CHECKS
+═══════════════════════════════════════════════════════════════════════════════
+The values below MUST match where indicated, or the system will silently fail:
+
+  DATABASE_URL on BE  ==  DATABASE_URL on RAG
+    → otherwise: ingested chunks land in one DB, BE queries the other,
+      every /chat returns "no documents contain this information"
+
+  UPLOAD_API_KEY on BE  ==  CORE_BACKEND_API_KEY on FE
+    → otherwise: 401 on every /upload and /query call
+
+  AUTH0_AUDIENCE on BE  ==  VITE_AUTH0_AUDIENCE on FE
+    → otherwise: Auth0 token audience mismatch, every /api/* gets 401
+
+  RAG_SERVICE_ADDRESS on BE  =  https://<rag-render-hostname>.onrender.com
+    → HTTP mode (default). USE_GRPC_RAG must be false.
+    → For gRPC fallback: <rag-render-hostname>.onrender.com:443 (no "https://"
+      prefix; the ":443" suffix triggers the gRPC client's TLS channel) and
+      USE_GRPC_RAG=true.
+
+  NEXT_PUBLIC_API_URL on FE  ==  CORE_BACKEND_API_URL on FE
+    → both point at the BE's public URL
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ AUTH0 DASHBOARD — ALSO UPDATE
+═══════════════════════════════════════════════════════════════════════════════
+After you know the FE's public Render URL:
+
+  Allowed Callback URLs   →  https://<fe-render-hostname>.onrender.com/callback
+  Allowed Logout URLs     →  https://<fe-render-hostname>.onrender.com
+  Allowed Web Origins     →  https://<fe-render-hostname>.onrender.com
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ ORDER OF FIRST-TIME DEPLOY
+═══════════════════════════════════════════════════════════════════════════════
+1. Deploy RAG service. Note its public hostname.
+2. Deploy BE service with RAG_SERVICE_ADDRESS pointing at RAG hostname.
+   Note BE's public hostname.
+3. Deploy FE service with NEXT_PUBLIC_API_URL / CORE_BACKEND_API_URL pointing
+   at BE hostname, and all four VITE_AUTH0_* values set as BUILD-time vars.
+4. Update Auth0 dashboard with the FE's public URL.
+5. Smoke test:
+     curl https://<be-hostname>.onrender.com/health
+       → {"status":"healthy",...}
+     curl -X POST https://<be-hostname>.onrender.com/api/wizard/extract-metadata \
+       -H "Authorization: Bearer dev" -H "Content-Type: application/json" \
+       -d '{"protocolFilename":"smoke.pdf","protocolContent":"Protocol Number: T-1\nSponsor: T\nPhase: I"}'
+       → HTTP 200 with extracted metadata
+   That last call is what was returning 502 before — once it returns 200, the
+   FE → BE → RAG → Anthropic chain is fully working in cloud.

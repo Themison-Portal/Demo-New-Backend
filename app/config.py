@@ -13,8 +13,13 @@ class Settings(BaseSettings):
     Application settings
     """
 
+    # Phase 6 of LLM consolidation: the BE no longer calls LLM providers
+    # directly. The RAG service owns OpenAI/Anthropic access. Both keys
+    # below are intentionally optional with empty defaults so cloud deploys
+    # can omit them entirely. The in-process RAG path (USE_GRPC_RAG=false)
+    # is no longer supported.
     openai_api_key: str = ""
-    anthropic_api_key: str = ""  # Required for Claude Opus 4.5
+    anthropic_api_key: str = ""
     database_url: str = ""  # PostgreSQL connection (asyncpg format)
     redis_url: str = ""
     frontend_url: str = "http://localhost:3000"  # Optional with default
@@ -65,11 +70,30 @@ class Settings(BaseSettings):
     contextual_retrieval_enabled: bool = False
     contextual_context_window: int = 3  # Include N surrounding chunks for context
 
-    # gRPC RAG Service configuration
-    rag_service_address: str = "localhost:50051"  # Address of RAG gRPC service
-    rag_service_timeout: float = 600.0  # gRPC timeout in seconds for RAG service calls
-    use_grpc_rag: bool = False  # Feature flag for gradual rollout
-    
+    # RAG Service connection.
+    #
+    # `rag_service_address` accepts two shapes:
+    #   - HTTP (default):  http://host:8000  /  https://<render-host>  (any path-less URL)
+    #   - gRPC fallback:   host:50051        /  <render-host>:443      (bare host:port)
+    #
+    # Transport selection is done by `use_grpc_rag`; the gRPC client lives in
+    # rag_client.py and the HTTP client in rag_http_client.py — both expose the
+    # same async interface, so call sites in app/api/routes/** don't care which
+    # transport is active.
+    rag_service_address: str = "http://localhost:8000"
+    rag_service_timeout: float = 600.0  # seconds, applies to both transports
+    use_grpc_rag: bool = False
+
+    # Where PDF ingestion runs. This is INDEPENDENT of `use_grpc_rag` (which only
+    # selects HTTP vs gRPC transport):
+    #   - False (default): delegate ingestion to the rag-service (over the
+    #     transport `use_grpc_rag` selects). Heavy docling/ML work stays out of
+    #     this backend process, and ingestion + querying share the rag-service's
+    #     store so chat reliably finds the chunks.
+    #   - True: run docling ingestion IN-PROCESS here (local dev with no
+    #     rag-service available). Memory-heavy — not for the 512MB Render tier.
+    rag_local_ingestion: bool = False
+
     # Email Configuration
     sendgrid_api_key: str = ""
     email_from: str = "noreply@themison.com"

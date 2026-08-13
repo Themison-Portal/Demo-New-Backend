@@ -23,6 +23,7 @@ class UploadDocumentRequest(BaseModel):
     """Upload document request."""
     document_url: str
     document_id: UUID
+    organization_id: Optional[UUID] = None
     chunk_size: Optional[int] = 750
 
 
@@ -54,10 +55,12 @@ async def _run_ingestion_task(
     job_id: str,
     document_url: str,
     document_id: UUID,
+    organization_id: UUID,
     chunk_size: int,
     redis_client,
     use_grpc: bool,
     grpc_address: str,
+    use_local: bool = False,
 ):
     """
     Background task for PDF ingestion.
@@ -87,53 +90,70 @@ async def _run_ingestion_task(
             )
             logger.info(f"Resolved GCS blob path to signed URL for job {job_id}")
 
-        if use_grpc:
-            # In Docker, the rag-service can't reach localhost:8000 (the backend).
-            # Translate to the Docker-internal hostname so it resolves correctly.
-            # GCS signed URLs (https://storage.googleapis.com/...) are unaffected.
-            grpc_url = document_url.replace("localhost:8000", "backend:8000")
+        # Translate local URLs (localhost/127.0.0.1 with any port) to the internal backend host and port (backend:8080)
+        # so that both the local container and the external RAG service container can resolve and download the file.
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(document_url)
+        if parsed.hostname in ("localhost", "127.0.0.1"):
+            parsed = parsed._replace(netloc="backend:8080")
+            document_url = urlunparse(parsed)
+            logger.info(f"Translated local document URL for container networking: {document_url}")
 
-            # gRPC path - stream progress from RAG service
+        if not use_local:
+            # Delegate ingestion to the rag-service. The transport (HTTP vs gRPC)
+            # is chosen inside get_rag_client() from settings.use_grpc_rag, so HTTP
+            # delegation works even when use_grpc_rag is False. This keeps heavy
+            # docling/ML work OUT of this backend process (avoids the 512MB OOM)
+            # and ensures ingestion and querying share the rag-service's store.
             await _ingest_via_grpc(
                 job_id=job_id,
-                document_url=grpc_url,
+                document_url=document_url,
                 document_id=document_id,
+                organization_id=organization_id,
                 chunk_size=chunk_size,
                 job_service=job_service,
                 grpc_address=grpc_address,
             )
         else:
-            # Local path - run ingestion with progress updates
+            # In-process docling ingestion (local dev only; memory-heavy).
             await _ingest_via_local(
                 job_id=job_id,
                 document_url=document_url,
                 document_id=document_id,
+                organization_id=organization_id,
                 chunk_size=chunk_size,
                 job_service=job_service,
                 redis_client=redis_client,
             )
 
     except Exception as e:
-        logger.exception(f"Ingestion task failed for job {job_id}")
+        logger.error(f"Ingestion task failed for job {job_id}: {e}")
         await job_service.fail_job(job_id, str(e))
         await _set_ingestion_status(document_id, "failed")
+        
 
 
 async def _ingest_via_grpc(
     job_id: str,
     document_url: str,
     document_id: UUID,
+    organization_id: UUID,
     chunk_size: int,
     job_service: JobStatusService,
     grpc_address: str,
 ):
-    """Ingest PDF using gRPC RAG Service with progress streaming."""
-    from app.clients.rag_client import RagClient
+    """Ingest PDF using the RAG service (gRPC or HTTP, selected by config)."""
+    from app.clients.rag_client import get_rag_client
 
-    client = RagClient(grpc_address)
+    # Transport selection happens in get_rag_client() based on settings.use_grpc_rag.
+    # grpc_address argument is kept in the signature for backwards compat but is
+    # only used when the singleton has not been built yet AND grpc is selected;
+    # in practice both clients read settings directly.
+    client = get_rag_client()
     result = None
 
-    # Map protobuf IngestStage enum ints to string names
+    # Map gRPC IngestStage enum ints to lowercase stage names. The HTTP client
+    # already yields stage as a string, so we accept either shape.
     _STAGE_NAMES = {
         0: "unspecified", 1: "downloading", 2: "parsing",
         3: "chunking", 4: "embedding", 5: "storing",
@@ -144,14 +164,18 @@ async def _ingest_via_grpc(
     async for progress in client.ingest_pdf(
         document_url=document_url,
         document_id=document_id,
+        organization_id=organization_id,
         chunk_size=chunk_size,
     ):
         if not status_set:
             await _set_ingestion_status(document_id, "processing")
             status_set = True
-        # Map gRPC progress to job status
+        # Map gRPC int enum or HTTP string to a normalized lowercase stage label.
         raw_stage = progress.get("stage", 0)
-        stage = _STAGE_NAMES.get(raw_stage, str(raw_stage))
+        if isinstance(raw_stage, int):
+            stage = _STAGE_NAMES.get(raw_stage, str(raw_stage))
+        else:
+            stage = str(raw_stage).lower()
         percent = progress.get("progress_percent", 0)
         message = progress.get("message", "")
 
@@ -179,6 +203,7 @@ async def _ingest_via_local(
     job_id: str,
     document_url: str,
     document_id: UUID,
+    organization_id: UUID,
     chunk_size: int,
     job_service: JobStatusService,
     redis_client,
@@ -291,6 +316,7 @@ async def _ingest_via_local(
         # Store chunks
         await rag_service._insert_docling_chunks(
             document_id=document_id,
+            organization_id=organization_id,
             document_url=document_url,
             chunks=docs,
             embeddings=chunk_embeddings,
@@ -319,40 +345,63 @@ async def upload_pdf_document(
     job_service: JobStatusService = Depends(get_job_status_service),
     x_api_key: str = Header(...),
 ):
-    """
-    Upload a PDF document for processing.
-
-    Returns immediately with a job ID. Use GET /upload/status/{job_id} to poll for progress.
-    """
     settings = get_settings()
 
-    # Validate API key
     if not settings.upload_api_key or x_api_key != settings.upload_api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Validate file type (handle URLs with query params like ?token=abc)
     from urllib.parse import urlparse
     url_path = urlparse(body.document_url).path.lower()
     if not url_path.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-    # Create job
+    # organization_id isn't always supplied by callers (e.g. the FE upload
+    # flow) - the document already exists with a trial_id by this point,
+    # so derive org from Document -> Trial rather than requiring every
+    # caller to know/send it.
+    organization_id = body.organization_id
+    if organization_id is None:
+        from sqlalchemy import select
+        from app.models.documents import Document
+        from app.models.trials import Trial
+        from app.db.session import async_session
+
+        async with async_session() as db:
+            doc = (
+                await db.execute(select(Document).where(Document.id == body.document_id))
+            ).scalar_one_or_none()
+            if doc is None or doc.trial_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="organization_id not provided and could not be derived "
+                           "from document (missing document or trial_id)",
+                )
+            trial = (
+                await db.execute(select(Trial).where(Trial.id == doc.trial_id))
+            ).scalar_one_or_none()
+            if trial is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Trial {doc.trial_id} not found for document {body.document_id}",
+                )
+            organization_id = trial.organization_id
+
     job_id = await job_service.create_job(body.document_id)
     await _set_ingestion_status(body.document_id, "queued")
 
-    # Get redis client for background task
     redis_client = request.app.state.redis_client
 
-    # Queue background task
     background_tasks.add_task(
         _run_ingestion_task,
         job_id=job_id,
         document_url=body.document_url,
         document_id=body.document_id,
+        organization_id=organization_id,
         chunk_size=body.chunk_size or 750,
         redis_client=redis_client,
         use_grpc=settings.use_grpc_rag,
         grpc_address=settings.rag_service_address,
+        use_local=settings.rag_local_ingestion,
     )
 
     logger.info(f"Queued ingestion job {job_id} for document {body.document_id}")

@@ -27,6 +27,15 @@ class DocumentBase(BaseContract):
     description: Optional[str] = None
     tags: Optional[List[str]] = None
     warning: Optional[bool] = None
+    # FE-only fields migrated from the FE `protocols` table.
+    category: Optional[str] = None
+    document_version: Optional[str] = None
+    amendment_version: Optional[str] = None
+    release_date: Optional[str] = None
+    is_current: Optional[bool] = None
+    archived_at: Optional[datetime] = None
+    source_type: Optional[str] = None
+    source_reference: Optional[str] = None
 
 class DocumentCreate(DocumentBase):
     """
@@ -53,6 +62,15 @@ class DocumentUpdate(BaseContract):
     description: Optional[str] = None
     tags: Optional[List[str]] = None
     warning: Optional[bool] = None
+    # FE-only fields migrated from the FE `protocols` table.
+    category: Optional[str] = None
+    document_version: Optional[str] = None
+    amendment_version: Optional[str] = None
+    release_date: Optional[str] = None
+    is_current: Optional[bool] = None
+    archived_at: Optional[datetime] = None
+    source_type: Optional[str] = None
+    source_reference: Optional[str] = None
 
 class DocumentResponse(DocumentBase, TimestampedContract):
     """
@@ -61,6 +79,8 @@ class DocumentResponse(DocumentBase, TimestampedContract):
     id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
+    # Derived (joined from members.name) — not a column on trial_documents.
+    uploaded_by_name: Optional[str] = None
 
     model_config = {
         "from_attributes": True

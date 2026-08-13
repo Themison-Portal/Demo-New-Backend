@@ -56,19 +56,25 @@ def main():
 
 
 def fix_imports():
-    """Fix import statements in generated files."""
+    """Fix import statements in generated files.
+
+    Generated grpc files contain `from rag.v1 import rag_service_pb2`, which
+    only resolves if the runtime is invoked from inside the `protos/` tree.
+    Rewrite to the absolute path under `app.clients.generated.rag.v1` so the
+    BE package can import them from any working directory.
+    """
     for py_file in OUTPUT_DIR.glob("**/*_pb2*.py"):
         content = py_file.read_text()
         original = content
 
-        # Fix imports to use app.clients prefix
+        # Active layout: app/clients/generated/rag/v1/*
         content = content.replace(
             "from rag.v1 import",
-            "from app.clients.rag.v1 import"
+            "from app.clients.generated.rag.v1 import"
         )
         content = content.replace(
             "import rag.v1.",
-            "import app.clients.rag.v1."
+            "import app.clients.generated.rag.v1."
         )
 
         if content != original:
