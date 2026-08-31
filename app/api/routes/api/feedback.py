@@ -21,7 +21,7 @@ from app.models.members import Member
 router = APIRouter()
 
 
-@router.post("/feedback/", response_model=SuggestionFeedbackResponse, status_code=201)
+@router.post("/", response_model=SuggestionFeedbackResponse, status_code=201)
 async def create_suggestion_feedback(
     payload: SuggestionFeedbackCreate,
     member: Member = Depends(get_current_member),
@@ -45,7 +45,7 @@ async def create_suggestion_feedback(
     return feedback
 
 
-@router.get("/feedback/", response_model=List[SuggestionFeedbackResponse])
+@router.get("/", response_model=List[SuggestionFeedbackResponse])
 async def list_suggestion_feedback(
     org_id: str,
     status: Optional[FeedbackStatus] = None,
@@ -65,7 +65,7 @@ async def list_suggestion_feedback(
     return result.scalars().all()
 
 
-@router.delete("/feedback/{feedback_id}", status_code=204)
+@router.delete("/{feedback_id}", status_code=204)
 async def delete_suggestion_feedback(
     feedback_id: UUID,
     member: Member = Depends(get_current_member),
