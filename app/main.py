@@ -280,7 +280,7 @@ app.include_router(
     qa_repository_router, prefix="/api/qa-repository", tags=["qa-repository"]
 )
 app.include_router(archive_router, prefix="/api/archive", tags=["archive"])
-app.include_router(feedback_router, prefix="api/archive", tags=["feedback"])
+app.include_router(feedback_router, prefix="/api/feedback", tags=["feedback"])
 
 # Collaboration Hub
 app.include_router(inbox_router, prefix="/api/inbox", tags=["inbox"])
