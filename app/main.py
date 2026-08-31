@@ -43,6 +43,7 @@ from app.api.routes.api.chat_sessions import router as chat_sessions_router
 from app.api.routes.api.chat_messages import router as chat_messages_router
 from app.api.routes.api.qa_repository import router as qa_repository_router
 from app.api.routes.api.archive import router as archive_router
+from app.api.routes.api.feedback import router as feedback_router
 from app.api.routes.api.tasks import router as tasks_router
 from app.api.routes.api.task_dependencies import router as task_dependencies_router
 from app.api.routes.api.activities import router as trial_activities_router
@@ -279,6 +280,7 @@ app.include_router(
     qa_repository_router, prefix="/api/qa-repository", tags=["qa-repository"]
 )
 app.include_router(archive_router, prefix="/api/archive", tags=["archive"])
+app.include_router(feedback_router, prefix="api/archive", tags=["feedback"])
 
 # Collaboration Hub
 app.include_router(inbox_router, prefix="/api/inbox", tags=["inbox"])
