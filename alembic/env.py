@@ -49,6 +49,7 @@ from app.models.qa_repository import QARepositoryItem
 from app.models.semantic_cache import SemanticCacheResponse
 from app.models.saved_response import SavedResponse
 from app.models.archive_folder import ArchiveFolder
+from app.models.suggestion_feedback import SuggestionFeedback
 from app.models.activity_types import ActivityType
 from app.models.trial_activity_types import TrialActivityType
 from app.models.visit_activities import VisitActivity
