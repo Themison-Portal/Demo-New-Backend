@@ -29,7 +29,6 @@ TRANSPORT=http
 # GRPC_PORT=50051
 
 # ─── Optional (code defaults are fine for most deployments) ──────────────────
-LLM_MODEL=claude-sonnet-4-6
 GRPC_MAX_WORKERS=10
 HYBRID_SEARCH_ENABLED=true
 SEMANTIC_CACHE_SIMILARITY_THRESHOLD=0.90
@@ -38,9 +37,20 @@ EMBEDDING_DIMENSIONS=1536
 RETRIEVAL_TOP_K=20
 RETRIEVAL_MIN_SCORE=0.04
 
+# ─── Provider switch (eval / prod decision) ──────────────────────────────────
+GENERATION_PROVIDER=anthropic          # "anthropic" | "openai" — flip to pick winner
+CONTEXTUAL_PROVIDER=anthropic          # "anthropic" | "openai"
+LLM_MODEL=claude-sonnet-4-6            # Anthropic "smart" tier
+LLM_MODEL_FAST=claude-haiku-4-5-20251001
+LLM_MODEL_OPENAI_SMART=gpt-5.6-terra
+LLM_MODEL_OPENAI_FAST=gpt-5.6-luna
+
+# ─── Eval isolation (set true ONLY on the environment running eval comparisons) ─
+DISABLE_SEMANTIC_CACHE=false
+
 # ─── Optional (enable only if you turn on Cohere reranking) ──────────────────
-# RERANKER_ENABLED=true
-# COHERE_API_KEY=<cohere key>
+RERANKER_ENABLED=true
+COHERE_API_KEY=<cohere key>
 
 
 ═══════════════════════════════════════════════════════════════════════════════
